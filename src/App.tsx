@@ -152,45 +152,118 @@ export default function App() {
     
     let currentY = 35;
 
-    data.forEach((ev, index) => {
-      // Event Header
-      if (currentY > 250) { doc.addPage(); currentY = 20; }
-      
+    // Helper for status colors in PDF
+    const getStatusColors = (status: string) => {
+      const s = status.toUpperCase();
+      if (s === 'FINALIZADO') return { fill: [209, 250, 229], text: [6, 78, 59] }; // Green
+      if (s === 'EN PROCESO') return { fill: [254, 243, 199], text: [146, 64, 14] }; // Yellow/Amber
+      if (s === 'ABANDONADO') return { fill: [254, 226, 226], text: [153, 27, 27] }; // Red
+      return { fill: [224, 231, 255], text: [49, 46, 129] }; // Blue/Default
+    };
+
+    // Prep data with completion dates
+    const dataWithDates = data.map(ev => {
       const evSegs = followUps.filter(s => s.id_eventos === ev.id);
-      
-      autoTable(doc, {
-        startY: currentY,
-        head: [['Proyecto', 'Categoría', 'Supervisor', 'Estado', 'Inicio']],
-        body: [[ev.titulo, ev.categoria, ev.supervisor, ev.estado, format(new Date(ev.fecha_inicio), 'dd/MM/yyyy')]],
-        theme: 'striped',
-        headStyles: { fillColor: [79, 70, 229] }, // indigo-600
-        styles: { fontSize: 9, cellPadding: 3 },
+      const sortedSegs = [...evSegs].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+      const latestEstimate = sortedSegs.find(s => s.fecha_finalizacion)?.fecha_finalizacion || null;
+      return { ...ev, latestEstimate };
+    });
+
+    const groupedData: { [key: string]: typeof dataWithDates } = dataWithDates.reduce((acc: any, ev) => {
+      if (!acc[ev.categoria]) acc[ev.categoria] = [];
+      acc[ev.categoria].push(ev);
+      return acc;
+    }, {});
+
+    Object.keys(groupedData).sort().forEach(cat => {
+      const eventsInCat = groupedData[cat].sort((a, b) => {
+        if (!a.latestEstimate && !b.latestEstimate) return 0;
+        if (!a.latestEstimate) return 1;
+        if (!b.latestEstimate) return -1;
+        return new Date(a.latestEstimate).getTime() - new Date(b.latestEstimate).getTime();
       });
 
-      currentY = (doc as any).lastAutoTable.finalY + 2;
+      if (currentY > 260) { doc.addPage(); currentY = 20; }
+      doc.setFontSize(12);
+      doc.setTextColor(79, 70, 229); // indigo-600
+      doc.setFont(undefined, 'bold');
+      doc.text(`Categoría: ${cat}`, 14, currentY + 5);
+      doc.setFont(undefined, 'normal');
+      currentY += 10;
 
-      if (evSegs.length > 0) {
+      eventsInCat.forEach((ev) => {
+        if (currentY > 240) { doc.addPage(); currentY = 20; }
+        
+        // Follow-ups sorted by completion date (oldest to newest)
+        const evSegs = followUps
+          .filter(s => s.id_eventos === ev.id)
+          .sort((a, b) => {
+            if (!a.fecha_finalizacion && !b.fecha_finalizacion) return 0;
+            if (!a.fecha_finalizacion) return 1;
+            if (!b.fecha_finalizacion) return -1;
+            return new Date(a.fecha_finalizacion).getTime() - new Date(b.fecha_finalizacion).getTime();
+          });
+
+        const estFin = ev.latestEstimate ? format(new Date(ev.latestEstimate), 'dd/MM/yyyy') : 'Pendiente';
+        
         autoTable(doc, {
           startY: currentY,
-          head: [['Fecha', 'Responsable', 'Detalle del Avance', 'Estado Avance']],
-          body: evSegs.map(s => [
-            format(new Date(s.fecha), 'dd/MM/yyyy'),
-            s.responsable,
-            s.descripcion_avance,
-            s.estado
-          ]),
+          head: [['Proyecto', 'Supervisor', 'Estado', 'Inicio', 'Fin Estimado']],
+          body: [[
+            ev.titulo, 
+            ev.supervisor, 
+            ev.estado, 
+            format(new Date(ev.fecha_inicio), 'dd/MM/yyyy'),
+            estFin
+          ]],
           theme: 'grid',
-          headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105] }, // slate-100 / slate-600
-          styles: { fontSize: 7, cellPadding: 2 },
-          columnStyles: { 2: { cellWidth: 80 } }
+          headStyles: { fillColor: [79, 70, 229] },
+          styles: { fontSize: 8, cellPadding: 2 },
+          didParseCell: (data) => {
+            if (data.section === 'body' && data.column.index === 2) {
+              const colors = getStatusColors(data.cell.raw as string);
+              data.cell.styles.fillColor = colors.fill as any;
+              data.cell.styles.textColor = colors.text as any;
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
         });
-        currentY = (doc as any).lastAutoTable.finalY + 10;
-      } else {
-        doc.setFontSize(8);
-        doc.setTextColor(150);
-        doc.text("Sin registros de seguimiento.", 18, currentY + 5);
-        currentY += 15;
-      }
+
+        currentY = (doc as any).lastAutoTable.finalY + 1;
+
+        if (evSegs.length > 0) {
+          autoTable(doc, {
+            startY: currentY,
+            head: [['Fecha Reporte', 'Fin Est.', 'Responsable', 'Detalle del Avance', 'Estado']],
+            body: evSegs.map(s => [
+              format(new Date(s.fecha), 'dd/MM/yyyy'),
+              s.fecha_finalizacion ? format(new Date(s.fecha_finalizacion), 'dd/MM/yyyy') : 'S/E',
+              s.responsable,
+              s.descripcion_avance,
+              s.estado
+            ]),
+            theme: 'grid',
+            headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105] },
+            styles: { fontSize: 7, cellPadding: 2 },
+            columnStyles: { 3: { cellWidth: 80 } },
+            didParseCell: (data) => {
+              if (data.section === 'body' && data.column.index === 4) {
+                const colors = getStatusColors(data.cell.raw as string);
+                data.cell.styles.fillColor = colors.fill as any;
+                data.cell.styles.textColor = colors.text as any;
+                data.cell.styles.fontStyle = 'bold';
+              }
+            }
+          });
+          currentY = (doc as any).lastAutoTable.finalY + 8;
+        } else {
+          doc.setFontSize(7);
+          doc.setTextColor(150);
+          doc.text("Sin registros de seguimiento.", 18, currentY + 4);
+          currentY += 10;
+        }
+      });
+      currentY += 5;
     });
     
     doc.save(`${title.toLowerCase().replace(/\s/g, '_')}_${format(new Date(), 'yyyyMMdd')}.pdf`);
@@ -418,8 +491,10 @@ export default function App() {
                                <td className="px-6 py-4">{ev.supervisor}</td>
                                <td className="px-6 py-4">
                                  <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                                   ev.estado === 'FINALIZADO' ? 'bg-green-100 text-green-700' : 
-                                   ev.estado === 'EN PROCESO' ? 'bg-yellow-100 text-yellow-700' : 'bg-indigo-100 text-indigo-700'
+                                   ev.estado === 'FINALIZADO' ? 'bg-emerald-100 text-emerald-800' : 
+                                   ev.estado === 'EN PROCESO' ? 'bg-amber-100 text-amber-800' : 
+                                   ev.estado === 'ABANDONADO' ? 'bg-rose-100 text-rose-800' : 
+                                   'bg-indigo-100 text-indigo-800'
                                  }`}>
                                    {ev.estado}
                                  </span>
@@ -508,7 +583,10 @@ function EventCard({ event, onClick, index }: { event: Evento, onClick: () => vo
     >
       <div className="absolute top-0 right-0 p-8 flex gap-2">
          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${
-           event.estado === 'FINALIZADO' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'
+           event.estado === 'FINALIZADO' ? 'bg-emerald-100 text-emerald-800' : 
+            event.estado === 'EN PROCESO' ? 'bg-amber-100 text-amber-800' : 
+            event.estado === 'ABANDONADO' ? 'bg-rose-100 text-rose-800' : 
+            'bg-indigo-100 text-indigo-800'
          }`}>
            {event.estado}
          </span>
@@ -726,7 +804,12 @@ function EventDetail({ id, onBack, categories, states }: any) {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 bg-slate-900 text-white text-[9px] font-bold uppercase rounded tracking-widest mr-1">
+                    <span className={`px-2 py-1 text-[9px] font-bold uppercase rounded tracking-widest mr-1 ${
+                      s.estado === 'FINALIZADO' ? 'bg-emerald-100 text-emerald-800' : 
+                      s.estado === 'EN PROCESO' ? 'bg-amber-100 text-amber-800' : 
+                      s.estado === 'ABANDONADO' ? 'bg-rose-100 text-rose-800' : 
+                      'bg-indigo-100 text-indigo-800'
+                    }`}>
                       {s.estado}
                     </span>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
