@@ -237,6 +237,24 @@ export default function App() {
     }, {});
   }, [filteredEvents]);
 
+  const deleteEvent = async (id: string) => {
+    if (!window.confirm("¿Estás seguro de que deseas eliminar este registro permanentemente? Esta acción no se puede deshacer y eliminará también toda su bitácora.")) return;
+    
+    try {
+      // Delete associated follow-ups first due to potential foreign key constraints
+      await supabase.from('seguimiento').delete().eq('id_eventos', id);
+      const { error } = await supabase.from('eventos').delete().eq('id', id);
+      
+      if (error) throw error;
+      
+      fetchInitialData();
+      alert("Registro eliminado con éxito.");
+    } catch (err: any) {
+      console.error("Delete error:", err);
+      alert("Error al eliminar el registro.");
+    }
+  };
+
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -407,11 +425,25 @@ export default function App() {
                                  </span>
                                </td>
                                <td className="px-6 py-4 text-xs font-medium">{format(new Date(ev.fecha_inicio), 'yyyy-MM-dd')}</td>
-                               <td className="px-6 py-4 text-right">
-                                 <button onClick={() => setSelectedEventId(ev.id)} className="text-indigo-600 font-bold hover:text-indigo-800 transition-colors text-xs uppercase tracking-tighter cursor-pointer">
-                                   {ev.estado === 'FINALIZADO' ? 'Ver Ficha' : 'Gestionar'}
-                                 </button>
-                               </td>
+                                <td className="px-6 py-4 text-right">
+                                  <div className="flex items-center justify-end gap-3">
+                                    <button 
+                                      onClick={() => setSelectedEventId(ev.id)} 
+                                      className="text-indigo-600 font-bold hover:text-indigo-800 transition-colors text-xs uppercase tracking-tighter cursor-pointer"
+                                    >
+                                      {ev.estado === 'FINALIZADO' ? 'Ver Ficha' : 'Gestionar'}
+                                    </button>
+                                    {view === 'history' && (
+                                      <button 
+                                        onClick={() => deleteEvent(ev.id)}
+                                        className="text-slate-300 hover:text-red-600 transition-colors p-1"
+                                        title="Eliminar registro"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
                              </tr>
                            ))}
                          </tbody>
