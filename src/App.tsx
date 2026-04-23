@@ -194,7 +194,24 @@ export default function App() {
       eventsInCat.forEach((ev) => {
         if (currentY > 240) { doc.addPage(); currentY = 20; }
         
-        // Follow-ups sorted by completion date (oldest to newest)
+        // Event Title & Description
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text(ev.titulo.toUpperCase(), 14, currentY + 5);
+        currentY += 8;
+
+        if (ev.descripcion) {
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "italic");
+          doc.setTextColor(100, 116, 139);
+          const splitDesc = doc.splitTextToSize(ev.descripcion, 180);
+          doc.text(splitDesc, 14, currentY);
+          currentY += (splitDesc.length * 4) + 4;
+        }
+        doc.setTextColor(15, 23, 42);
+
+        // Define and sort follow-ups for this event
         const evSegs = followUps
           .filter(s => s.id_eventos === ev.id)
           .sort((a, b) => {
@@ -204,15 +221,15 @@ export default function App() {
             return new Date(a.fecha_finalizacion).getTime() - new Date(b.fecha_finalizacion).getTime();
           });
 
-        const estFin = ev.latestEstimate ? format(new Date(ev.latestEstimate), 'dd/MM/yyyy') : 'Pendiente';
-        
+        // Event Main Info Table
+        const estFin = ev.fecha_cierre ? format(new Date(ev.fecha_cierre), 'dd/MM/yyyy') : 'Sin definir';
         autoTable(doc, {
           startY: currentY,
-          head: [['Proyecto', 'Supervisor', 'Estado', 'Inicio', 'Fin Estimado']],
+          head: [['Estado', 'Categoría', 'Supervisor', 'Inicio', 'Fin Est.']],
           body: [[
-            ev.titulo, 
-            ev.supervisor, 
-            ev.estado, 
+            ev.estado,
+            ev.categoria,
+            ev.supervisor,
             format(new Date(ev.fecha_inicio), 'dd/MM/yyyy'),
             estFin
           ]],
@@ -220,7 +237,7 @@ export default function App() {
           headStyles: { fillColor: [79, 70, 229] },
           styles: { fontSize: 8, cellPadding: 2 },
           didParseCell: (data) => {
-            if (data.section === 'body' && data.column.index === 2) {
+            if (data.section === 'body' && data.column.index === 0) {
               const colors = getStatusColors(data.cell.raw as string);
               data.cell.styles.fillColor = colors.fill as any;
               data.cell.styles.textColor = colors.text as any;
@@ -725,7 +742,9 @@ function EventDetail({ id, onBack, categories, states }: any) {
       titulo: fd.get('titulo'),
       descripcion: fd.get('descripcion'),
       estado: fd.get('estado'),
-      supervisor: fd.get('supervisor')
+      supervisor: fd.get('supervisor'),
+      fecha_inicio: fd.get('fecha_inicio'),
+      fecha_cierre: fd.get('fecha_cierre') || null
     };
     await supabase.from('eventos').update(payload).eq('id', id);
     alert("Registro actualizado correctamente");
@@ -767,6 +786,10 @@ function EventDetail({ id, onBack, categories, states }: any) {
               <div className="grid grid-cols-2 gap-4">
                 <Select name="estado" label="Estado" options={states} defaultValue={event.estado} />
                 <Input name="supervisor" label="Supervisor" defaultValue={event.supervisor} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Input name="fecha_inicio" label="Fecha Inicio" type="date" defaultValue={event.fecha_inicio} />
+                <Input name="fecha_cierre" label="Fecha Est. Cierre" type="date" defaultValue={event.fecha_cierre || ''} />
               </div>
               <div className="flex flex-col gap-2">
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">Resumen</label>
