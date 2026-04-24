@@ -161,7 +161,15 @@ export default function App() {
     doc.setTextColor(100, 116, 139); // slate-500
     doc.text(`Generado por: ${user?.nombre || 'Sistema'} | ${today}`, 14, 28);
     
-    let currentY = 35;
+    // Introducción
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(100, 116, 139); // slate-500
+    const introText = "Introducción: El presente documento muestra el progreso de las diversas líneas de gestión en las que participo. Los elementos han sido categorizados y sus avances ordenados por fecha estimada de finalización (de la más lejana a la más próxima), con el objetivo de optimizar el seguimiento mediante la generación alertas automáticas que garanticen la trazabilidad de cada proceso.";
+    const splitIntro = doc.splitTextToSize(introText, 182);
+    doc.text(splitIntro, 14, 38);
+    
+    let currentY = 38 + (splitIntro.length * 4) + 8;
 
     // Helper for status colors in PDF
     const getStatusColors = (status: string) => {
@@ -191,14 +199,15 @@ export default function App() {
         if (!a.latestEstimate && !b.latestEstimate) return 0;
         if (!a.latestEstimate) return 1;
         if (!b.latestEstimate) return -1;
-        return new Date(a.latestEstimate).getTime() - new Date(b.latestEstimate).getTime();
+        return new Date(b.latestEstimate).getTime() - new Date(a.latestEstimate).getTime();
       });
 
       if (currentY > 260) { doc.addPage(); currentY = 20; }
       doc.setFontSize(12);
       doc.setTextColor(79, 70, 229); // indigo-600
       doc.setFont(undefined, 'bold');
-      doc.text(`Categoría: ${cat}`, 14, currentY + 5);
+      const pageWidth = doc.internal.pageSize.getWidth();
+      doc.text(`Categoría: ${cat}`, pageWidth / 2, currentY + 5, { align: 'center' });
       doc.setFont(undefined, 'normal');
       currentY += 10;
 
@@ -229,7 +238,7 @@ export default function App() {
             if (!a.fecha_finalizacion && !b.fecha_finalizacion) return 0;
             if (!a.fecha_finalizacion) return 1;
             if (!b.fecha_finalizacion) return -1;
-            return new Date(a.fecha_finalizacion).getTime() - new Date(b.fecha_finalizacion).getTime();
+            return new Date(b.fecha_finalizacion).getTime() - new Date(a.fecha_finalizacion).getTime();
           });
 
         // Event Main Info Table
@@ -293,6 +302,15 @@ export default function App() {
       });
       currentY += 5;
     });
+    
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+    }
     
     doc.save(`${title.toLowerCase().replace(/\s/g, '_')}_${format(new Date(), 'yyyyMMdd')}.pdf`);
   };
@@ -457,7 +475,7 @@ export default function App() {
           
           <div className="flex items-center gap-2 w-full md:w-auto">
             {view !== 'config' && !selectedEventId && (
-              <Button onClick={() => exportPDF(view === 'dashboard' ? 'Eventos Activos' : 'Eventos Finalizados', filteredEvents)} variant="secondary" className="flex-1 md:flex-none text-xs md:text-sm">
+              <Button onClick={() => exportPDF(view === 'dashboard' ? 'Informe de Estado de Gestión' : 'Eventos Finalizados', filteredEvents)} variant="secondary" className="flex-1 md:flex-none text-xs md:text-sm">
                 <Download className="w-4 h-4" /> <span className="hidden sm:inline">Exportar PDF</span>
               </Button>
             )}
@@ -478,6 +496,7 @@ export default function App() {
                 onBack={() => { setSelectedEventId(null); fetchInitialData(); }} 
                 categories={categories} 
                 states={states}
+                fetchInitialData={fetchInitialData}
               />
             ) : view === 'config' ? (
               <ConfigView key="config" categories={categories} fetchInitialData={fetchInitialData} />
@@ -785,7 +804,7 @@ function EventModal({ onClose, categories, states, userId, onSuccess }: any) {
   );
 }
 
-function EventDetail({ id, onBack, categories, states }: any) {
+function EventDetail({ id, onBack, categories, states, fetchInitialData }: any) {
   const [event, setEvent] = useState<Evento | null>(null);
   const [followUps, setFollowUps] = useState<Seguimiento[]>([]);
   const [loading, setLoading] = useState(true);
