@@ -59,6 +59,15 @@ const Select = ({ label, options, ...props }: any) => (
   </div>
 );
 
+// --- Utility Functions ---
+
+const isUrgentReport = (s: Seguimiento | any) => {
+  if (!s.fecha_finalizacion || s.estado === 'FINALIZADO') return false;
+  const today = new Date();
+  const diff = (new Date(s.fecha_finalizacion).getTime() - today.getTime()) / (1000 * 3600 * 24);
+  return diff <= 3;
+};
+
 // --- Main Application ---
 
 export default function App() {
@@ -497,7 +506,7 @@ export default function App() {
                                <td className="px-6 py-4 font-medium text-slate-900 max-w-xs truncate">
                                  <div className="flex items-center gap-2">
                                    {hasUrgentFollowUp(ev.id) && (
-                                     <div className="flex h-2 w-2 relative">
+                                     <div className="flex h-2 w-2 relative" title="Este registro tiene seguimientos con menos de 3 días para su finalización estimada">
                                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                                         <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
                                      </div>
@@ -822,7 +831,15 @@ function EventDetail({ id, onBack, categories, states }: any) {
                       {format(new Date(s.fecha), 'dd')}
                     </div>
                     <div>
-                      <h4 className="font-bold text-slate-900 leading-none mb-1">{s.responsable}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-slate-900 leading-none mb-1">{s.responsable}</h4>
+                        {isUrgentReport(s) && (
+                          <div className="flex h-2 w-2 relative" title="Restan 3 días o menos para la fecha de finalización estimada">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
+                          </div>
+                        )}
+                      </div>
                       <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{format(new Date(s.fecha), 'MMMM yyyy', { locale: es })}</p>
                     </div>
                   </div>
