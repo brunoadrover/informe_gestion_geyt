@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Plus, Search, FileText, Settings, History, LogOut, 
   ChevronRight, Calendar, User, Tag, CheckCircle2, 
-  Trash2, Edit3, Save, X, ArrowLeft, Download, ShieldCheck
+  Trash2, Edit3, Save, X, ArrowLeft, Download, ShieldCheck,
+  Menu
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -82,6 +83,7 @@ export default function App() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('gest_user');
@@ -386,9 +388,29 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-800">
+      {/* Mobile Header Overlay */}
+      <div className="md:hidden flex items-center justify-between p-4 bg-slate-900 text-white sticky top-0 z-40 shadow-md">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center text-white shadow-sm">
+            <FileText className="w-4 h-4" />
+          </div>
+          <h1 className="text-lg font-bold tracking-tight">Informe Gestión</h1>
+        </div>
+        <button 
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="p-2 hover:bg-slate-800 rounded-md transition-colors"
+        >
+          {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
       {/* Sidebar Navigation */}
-      <aside className="w-full md:w-64 bg-slate-900 text-white flex flex-col sticky top-0 h-auto md:h-screen z-30">
-        <div className="p-6 mb-4">
+      <aside className={`
+        fixed inset-0 z-30 transform md:relative md:translate-x-0 transition-transform duration-300 ease-in-out
+        ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+        w-full md:w-64 bg-slate-900 text-white flex flex-col h-screen md:sticky md:top-0
+      `}>
+        <div className="p-6 mb-4 hidden md:block">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center text-white shadow-sm">
               <FileText className="w-4 h-4" />
@@ -397,10 +419,10 @@ export default function App() {
           </div>
         </div>
         
-        <nav className="flex-1 px-4 flex flex-col gap-1">
-          <NavItem active={view === 'dashboard' && !selectedEventId} onClick={() => { setView('dashboard'); setSelectedEventId(null); }} icon={FileText} label="Dashboard" />
-          <NavItem active={view === 'history'} onClick={() => { setView('history'); setSelectedEventId(null); }} icon={History} label="Historial / Finalizados" />
-          <NavItem active={view === 'config'} onClick={() => { setView('config'); setSelectedEventId(null); }} icon={Settings} label="Configuración" />
+        <nav className="flex-1 px-4 flex flex-col gap-1 pt-16 md:pt-0">
+          <NavItem active={view === 'dashboard' && !selectedEventId} onClick={() => { setView('dashboard'); setSelectedEventId(null); setMobileMenuOpen(false); }} icon={FileText} label="Dashboard" />
+          <NavItem active={view === 'history'} onClick={() => { setView('history'); setSelectedEventId(null); setMobileMenuOpen(false); }} icon={History} label="Historial / Finalizados" />
+          <NavItem active={view === 'config'} onClick={() => { setView('config'); setSelectedEventId(null); setMobileMenuOpen(false); }} icon={Settings} label="Configuración" />
         </nav>
 
         <div className="p-4 border-t border-slate-800">
@@ -420,9 +442,9 @@ export default function App() {
       </aside>
 
       {/* Workspace Area */}
-      <main className="flex-1 flex flex-col min-w-0 relative h-screen overflow-hidden">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-20 shrink-0 shadow-sm">
-          <div className="relative w-96 group">
+      <main className="flex-1 flex flex-col min-w-0 relative h-[calc(100vh-64px)] md:h-screen overflow-hidden">
+        <header className="h-auto md:h-16 bg-white border-b border-slate-200 flex flex-col md:flex-row items-center justify-between px-4 md:px-8 py-4 md:py-0 sticky top-0 z-20 shrink-0 shadow-sm gap-4">
+          <div className="relative w-full md:w-96 group">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
             <input 
               type="text" 
@@ -433,21 +455,21 @@ export default function App() {
             />
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 w-full md:w-auto">
             {view !== 'config' && !selectedEventId && (
-              <Button onClick={() => exportPDF(view === 'dashboard' ? 'Eventos Activos' : 'Eventos Finalizados', filteredEvents)} variant="secondary" className="hidden lg:flex">
-                <Download className="w-4 h-4" /> Exportar PDF
+              <Button onClick={() => exportPDF(view === 'dashboard' ? 'Eventos Activos' : 'Eventos Finalizados', filteredEvents)} variant="secondary" className="flex-1 md:flex-none text-xs md:text-sm">
+                <Download className="w-4 h-4" /> <span className="hidden sm:inline">Exportar PDF</span>
               </Button>
             )}
             {view === 'dashboard' && !selectedEventId && (
-              <Button onClick={() => setIsModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 shadow-sm">
-                + Nuevo Evento
+              <Button onClick={() => setIsModalOpen(true)} className="flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-700 shadow-sm text-xs md:text-sm">
+                + <span className="hidden sm:inline">Nuevo Evento</span><span className="sm:hidden">Nuevo</span>
               </Button>
             )}
           </div>
         </header>
 
-        <div className="p-8 flex-1 overflow-y-auto">
+        <div className="p-4 md:p-8 flex-1 overflow-y-auto">
           <AnimatePresence mode="wait">
             {selectedEventId ? (
               <EventDetail 
@@ -466,24 +488,67 @@ export default function App() {
                 className="flex flex-col gap-6"
               >
                 {/* Stats Row */}
-                <div className="grid grid-cols-3 gap-6 mb-2">
-                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Proyectos Activos</p>
-                    <p className="text-3xl font-bold text-slate-900">{events.filter(e => e.estado !== 'FINALIZADO').length}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6 mb-2">
+                  <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
+                    <p className="text-[10px] md:text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Proyectos Activos</p>
+                    <p className="text-2xl md:text-3xl font-bold text-slate-900">{events.filter(e => e.estado !== 'FINALIZADO').length}</p>
                   </div>
-                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Próximos a Vencer</p>
-                    <p className={`text-3xl font-bold ${urgentCount > 0 ? 'text-red-600' : 'text-slate-900'}`}>{urgentCount}</p>
+                  <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
+                    <p className="text-[10px] md:text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Próximos a Vencer</p>
+                    <p className={`text-2xl md:text-3xl font-bold ${urgentCount > 0 ? 'text-red-600' : 'text-slate-900'}`}>{urgentCount}</p>
                   </div>
-                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Finalizados</p>
-                    <p className="text-3xl font-bold text-indigo-600">{events.filter(e => e.estado === 'FINALIZADO').length}</p>
+                  <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
+                    <p className="text-[10px] md:text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Finalizados</p>
+                    <p className="text-2xl md:text-3xl font-bold text-indigo-600">{events.filter(e => e.estado === 'FINALIZADO').length}</p>
                   </div>
                 </div>
 
                 {/* Main List */}
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                   <div className="overflow-x-auto">
+                   <div className="md:hidden divide-y divide-slate-100">
+                     {Object.keys(groupedEvents).sort().map(cat => (
+                       <div key={cat} className="flex flex-col">
+                         <div className="bg-slate-50 px-4 py-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest border-y border-slate-100">
+                           {cat}
+                         </div>
+                         {groupedEvents[cat].map((ev) => (
+                           <div key={ev.id} className="p-4 hover:bg-slate-50 active:bg-slate-100 transition-colors" onClick={() => setSelectedEventId(ev.id)}>
+                             <div className="flex justify-between items-start mb-2">
+                               <div className="flex items-center gap-2">
+                                 {hasUrgentFollowUp(ev.id) && (
+                                   <div className="flex h-2 w-2 relative" title="Urgente">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
+                                   </div>
+                                 )}
+                                 <h3 className="font-bold text-slate-900 line-clamp-1">{ev.titulo}</h3>
+                               </div>
+                               <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
+                                 ev.estado === 'FINALIZADO' ? 'bg-emerald-100 text-emerald-800' : 
+                                 ev.estado === 'EN PROCESO' ? 'bg-amber-100 text-amber-800' : 
+                                 ev.estado === 'ABANDONADO' ? 'bg-rose-100 text-rose-800' : 
+                                 'bg-indigo-100 text-indigo-800'
+                               }`}>
+                                 {ev.estado}
+                               </span>
+                             </div>
+                             <div className="flex justify-between items-center text-[11px] text-slate-500">
+                               <div className="flex items-center gap-2">
+                                 <User className="w-3 h-3" />
+                                 <span className="truncate max-w-[100px]">{ev.supervisor}</span>
+                               </div>
+                               <div className="flex items-center gap-2">
+                                 <Calendar className="w-3 h-3" />
+                                 <span>{format(new Date(ev.fecha_inicio), 'dd/MM/yy')}</span>
+                               </div>
+                             </div>
+                           </div>
+                         ))}
+                       </div>
+                     ))}
+                   </div>
+
+                   <div className="hidden md:block overflow-x-auto">
                      <table className="w-full text-left border-collapse">
                        <thead className="bg-slate-50 border-b border-slate-200">
                          <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
@@ -694,15 +759,15 @@ function EventModal({ onClose, categories, states, userId, onSuccess }: any) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <form onSubmit={handleSubmit} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2">
             <Input name="titulo" label="Título del Evento" placeholder="Ej: Auditoría de Seguridad Anual" required />
           </div>
           <Select name="categoria" label="Categoría" options={categories} required />
           <Input name="supervisor" label="Supervisor" placeholder="Nombre del supervisor" required />
           <Input name="fecha_inicio" label="Fecha de Inicio" type="date" required defaultValue={format(new Date(), 'yyyy-MM-dd')} />
           <Input name="fecha_cierre" label="Fecha Estimada Cierre" type="date" />
-          <div className="col-span-2">
+          <div className="md:col-span-2">
             <div className="space-y-1">
               <label className="text-[11px] font-bold text-slate-500 uppercase">Descripción</label>
               <textarea name="descripcion" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm h-20 resize-none outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Detalles generales del evento..." required></textarea>
@@ -773,30 +838,30 @@ function EventDetail({ id, onBack, categories, states }: any) {
   );
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-10">
-      <div className="flex items-center gap-6">
-        <button onClick={onBack} className="w-12 h-12 bg-white border border-slate-200 rounded-2xl flex items-center justify-center hover:bg-slate-50 transition-colors shadow-sm">
-          <ArrowLeft className="w-6 h-6 text-slate-900" />
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-6 md:gap-10">
+      <div className="flex items-center gap-4 md:gap-6">
+        <button onClick={onBack} className="w-10 h-10 md:w-12 md:h-12 bg-white border border-slate-200 rounded-xl md:rounded-2xl flex items-center justify-center hover:bg-slate-50 transition-colors shadow-sm shrink-0">
+          <ArrowLeft className="w-5 h-5 md:w-6 md:h-6 text-slate-900" />
         </button>
-        <div>
-          <h2 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-2">{event.titulo}</h2>
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
+        <div className="min-w-0">
+          <h2 className="text-xl md:text-3xl font-black tracking-tight text-slate-900 leading-tight mb-1 md:mb-2 truncate">{event.titulo}</h2>
+          <div className="flex items-center gap-2 text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest">
             <div className="w-2 h-2 bg-indigo-500 rounded-full" /> {event.categoria}
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-        <aside className="lg:col-span-4 flex flex-col gap-8">
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
-            <h3 className="text-lg font-bold text-slate-900 mb-6 border-b border-slate-100 pb-3">Editar Datos</h3>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-10">
+        <aside className="lg:col-span-4 flex flex-col gap-8 order-2 lg:order-1">
+          <div className="bg-white p-5 md:p-6 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+            <h3 className="text-base md:text-lg font-bold text-slate-900 mb-6 border-b border-slate-100 pb-3">Editar Datos</h3>
             <form onSubmit={handleUpdate} className="flex flex-col gap-4 relative z-10">
               <Input name="titulo" label="Título" defaultValue={event.titulo} />
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Select name="estado" label="Estado" options={states} defaultValue={event.estado} />
                 <Input name="supervisor" label="Supervisor" defaultValue={event.supervisor} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input name="fecha_inicio" label="Fecha Inicio" type="date" defaultValue={event.fecha_inicio} />
                 <Input name="fecha_cierre" label="Fecha Est. Cierre" type="date" defaultValue={event.fecha_cierre || ''} />
               </div>
@@ -804,16 +869,16 @@ function EventDetail({ id, onBack, categories, states }: any) {
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">Resumen</label>
                 <textarea name="descripcion" rows={4} className="w-full bg-slate-50 border border-slate-200 rounded-md p-3 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={event.descripcion} />
               </div>
-              <Button type="submit" className="mt-2"><Save className="w-4 h-4" /> Guardar Cambios</Button>
+              <Button type="submit" className="mt-2 text-xs md:text-sm"><Save className="w-4 h-4" /> Guardar Cambios</Button>
             </form>
           </div>
         </aside>
 
-        <section className="lg:col-span-8 flex flex-col gap-8">
-          <div className="flex items-center justify-between px-2">
-            <h3 className="text-2xl font-black text-slate-900">Bitácora de Seguimiento</h3>
-            <Button onClick={() => setIsAddingFollowUp(true)}>
-              <Plus className="w-4 h-4" /> Nuevo Avance
+        <section className="lg:col-span-8 flex flex-col gap-6 md:gap-8 order-1 lg:order-2">
+          <div className="flex items-center justify-between px-2 gap-4">
+            <h3 className="text-xl md:text-2xl font-black text-slate-900 leading-tight">Bitácora de Seguimiento</h3>
+            <Button onClick={() => setIsAddingFollowUp(true)} className="shrink-0 text-xs md:text-sm px-3 md:px-4">
+              <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Nuevo Avance</span><span className="sm:hidden">Nuevo</span>
             </Button>
           </div>
 
@@ -875,7 +940,7 @@ function EventDetail({ id, onBack, categories, states }: any) {
                   {s.descripcion_avance}
                 </p>
 
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 pt-4 border-t border-slate-50">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 border-t border-slate-50">
                   <div>
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Recursos</span>
                     <span className="text-xs font-bold text-slate-700 truncate block">{s.recursos || 'S/E'}</span>
@@ -886,9 +951,9 @@ function EventDetail({ id, onBack, categories, states }: any) {
                       {s.fecha_finalizacion ? format(new Date(s.fecha_finalizacion), 'dd/MM/yyyy') : 'Pendiente'}
                     </span>
                   </div>
-                  <div className="hidden lg:block">
+                  <div className="sm:col-span-2 lg:col-span-1 border-t sm:border-t-0 sm:pt-0 pt-3 mt-3 sm:mt-0">
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Observación</span>
-                    <span className="text-xs font-bold text-slate-700 truncate block italic">{s.observaciones || '---'}</span>
+                    <span className="text-xs font-bold text-slate-700 block italic leading-snug">{s.observaciones || '---'}</span>
                   </div>
                 </div>
               </motion.div>
@@ -958,7 +1023,7 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
           <button onClick={onClose} className="w-8 h-8 hover:bg-white rounded-lg flex items-center justify-center text-slate-400 transition-colors cursor-pointer"><X /></button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input name="fecha" label="Fecha Reporte" type="date" required defaultValue={followUp?.fecha || format(new Date(), 'yyyy-MM-dd')} />
             <Input name="fecha_finalizacion" label="Fin Est." type="date" defaultValue={followUp?.fecha_finalizacion || ''} />
           </div>
@@ -968,13 +1033,13 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">Resumen de Actividades</label>
             <textarea name="descripcion" rows={4} className="w-full bg-slate-50 border border-slate-200 rounded-md p-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800" required placeholder="Describe qué se avanzó en este periodo..." defaultValue={followUp?.descripcion_avance || ''} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input name="recursos" label="Recursos" placeholder="Ej. Licencias, API" defaultValue={followUp?.recursos || ''} />
             <Input name="observaciones" label="Observaciones" defaultValue={followUp?.observaciones || ''} />
           </div>
           <div className="flex justify-end gap-3 mt-4">
-            <Button variant="ghost" onClick={onClose} className="px-6">Cancelar</Button>
-            <Button type="submit" disabled={loading} className="px-8">{loading ? 'Procesando...' : (followUp ? 'Actualizar' : 'Registrar')}</Button>
+            <Button variant="ghost" onClick={onClose} className="px-6 text-xs md:text-sm">Cancelar</Button>
+            <Button type="submit" disabled={loading} className="px-8 text-xs md:text-sm">{loading ? 'Procesando...' : (followUp ? 'Actualizar' : 'Registrar')}</Button>
           </div>
         </form>
       </motion.div>
@@ -1030,19 +1095,19 @@ function ConfigView({ categories, fetchInitialData }: any) {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:max-w-6xl mx-auto">
-      <section className="flex flex-col gap-8">
-        <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm">
-          <h3 className="text-2xl font-black mb-8 border-b border-slate-50 pb-4">Gestión de Categorías</h3>
-          <form onSubmit={addCategory} className="flex gap-3 mb-8">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10 lg:max-w-6xl mx-auto">
+      <section className="flex flex-col gap-6 md:gap-8">
+        <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[3rem] border border-slate-200 shadow-sm">
+          <h3 className="text-xl md:text-2xl font-black mb-6 md:mb-8 border-b border-slate-50 pb-4">Gestión de Categorías</h3>
+          <form onSubmit={addCategory} className="flex gap-3 mb-6 md:mb-8">
             <Input name="catName" placeholder="Nueva categoría..." required />
-            <Button type="submit" className="shrink-0 rounded-2xl w-14 h-11"><Plus className="w-6 h-6" /></Button>
+            <Button type="submit" className="shrink-0 rounded-xl md:rounded-2xl w-12 h-10 md:w-14 md:h-11"><Plus className="w-5 md:w-6 h-5 md:h-6" /></Button>
           </form>
-          <div className="flex flex-wrap gap-2.5">
+          <div className="flex flex-wrap gap-2 md:gap-2.5">
             {categories.map((c: any) => (
-              <div key={c.id} className="group flex items-center gap-3 bg-slate-50 border border-slate-100 pl-5 pr-2 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-white hover:border-slate-300 transition-all">
+              <div key={c.id} className="group flex items-center gap-2 md:gap-3 bg-slate-50 border border-slate-100 pl-4 md:pl-5 pr-1.5 md:pr-2 py-1.5 md:py-2 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-white hover:border-slate-300 transition-all">
                 {c.categoria}
-                <button onClick={() => deleteCategory(c.id)} className="w-6 h-6 rounded-lg hover:bg-red-50 flex items-center justify-center transition-colors text-slate-200 hover:text-red-500">
+                <button onClick={() => deleteCategory(c.id)} className="w-5 h-5 md:w-6 md:h-6 rounded-lg hover:bg-red-50 flex items-center justify-center transition-colors text-slate-200 hover:text-red-500">
                   <X className="w-3 h-3" />
                 </button>
               </div>
@@ -1051,26 +1116,26 @@ function ConfigView({ categories, fetchInitialData }: any) {
         </div>
       </section>
 
-      <section className="flex flex-col gap-8">
-        <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm">
-          <h3 className="text-2xl font-black mb-8 border-b border-slate-50 pb-4">Usuarios del Sistema</h3>
-          <form onSubmit={addUser} className="grid grid-cols-1 gap-5 mb-10 pb-10 border-b border-slate-50">
-            <div className="grid grid-cols-2 gap-4">
+      <section className="flex flex-col gap-6 md:gap-8">
+        <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[3rem] border border-slate-200 shadow-sm">
+          <h3 className="text-xl md:text-2xl font-black mb-6 md:mb-8 border-b border-slate-50 pb-4">Usuarios del Sistema</h3>
+          <form onSubmit={addUser} className="grid grid-cols-1 gap-4 md:gap-5 mb-8 md:mb-10 pb-8 md:pb-10 border-b border-slate-50">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input name="nombre" label="Nombre" placeholder="Nombre completo" required />
               <Input name="correo" label="Correo" type="email" placeholder="example@mail.com" required />
             </div>
             <Input name="password" label="Contraseña de Acceso" type="password" required />
-            <Button type="submit" disabled={loading} className="w-full h-12 rounded-xl mt-2 shadow-xl shadow-slate-900/5">Registrar Nuevo Acceso</Button>
+            <Button type="submit" disabled={loading} className="w-full h-11 md:h-12 rounded-xl mt-2 shadow-xl shadow-slate-900/5 text-xs md:text-sm">Registrar Nuevo Acceso</Button>
           </form>
           <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
             {users.map(u => (
-              <div key={u.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-[1.5rem] border border-slate-50 hover:bg-white hover:border-slate-200 transition-all group">
+              <div key={u.id} className="flex items-center justify-between p-3 md:p-4 bg-slate-50 rounded-xl md:rounded-[1.5rem] border border-slate-50 hover:bg-white hover:border-slate-200 transition-all group">
                 <div className="flex flex-col">
-                  <span className="font-black text-slate-900 text-sm leading-none mb-1">{u.nombre}</span>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{u.correo}</span>
+                  <span className="font-black text-slate-900 text-xs md:text-sm leading-none mb-1">{u.nombre}</span>
+                  <span className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest">{u.correo}</span>
                 </div>
-                <button onClick={() => deleteUser(u.id)} className="w-10 h-10 bg-white border border-transparent rounded-xl flex items-center justify-center text-slate-200 hover:border-red-100 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100">
-                  <Trash2 className="w-4 h-4" />
+                <button onClick={() => deleteUser(u.id)} className="w-8 h-8 md:w-10 md:h-10 bg-white border border-transparent rounded-lg md:rounded-xl flex items-center justify-center text-slate-200 hover:border-red-100 hover:text-red-500 transition-all md:opacity-0 md:group-hover:opacity-100">
+                  <Trash2 className="w-3.5 md:w-4 h-3.5 md:h-4" />
                 </button>
               </div>
             ))}
