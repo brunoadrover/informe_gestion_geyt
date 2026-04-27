@@ -84,6 +84,7 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('gest_user');
@@ -475,7 +476,7 @@ export default function App() {
           
           <div className="flex items-center gap-2 w-full md:w-auto">
             {view !== 'config' && !selectedEventId && (
-              <Button onClick={() => exportPDF(view === 'dashboard' ? 'Informe de Estado de Gestión' : 'Eventos Finalizados', filteredEvents)} variant="secondary" className="flex-1 md:flex-none text-xs md:text-sm">
+              <Button onClick={() => setIsExportModalOpen(true)} variant="secondary" className="flex-1 md:flex-none text-xs md:text-sm">
                 <Download className="w-4 h-4" /> <span className="hidden sm:inline">Exportar PDF</span>
               </Button>
             )}
@@ -660,6 +661,141 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      <ExportModal 
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        categories={categories}
+        events={filteredEvents}
+        onExport={(data) => exportPDF(view === 'dashboard' ? 'Informe de Estado de Gestión' : 'Eventos Finalizados', data)}
+      />
+    </div>
+  );
+}
+
+function ExportModal({ isOpen, onClose, categories, events, onExport }: any) {
+  const [mode, setMode] = useState<'all' | 'category' | 'individual'>('all');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
+
+  if (!isOpen) return null;
+
+  const handleExport = () => {
+    let filtered = events;
+    if (mode === 'category') {
+      filtered = events.filter((e: any) => selectedCategories.includes(e.categoria));
+    } else if (mode === 'individual') {
+      filtered = events.filter((e: any) => selectedEvents.includes(e.id));
+    }
+    
+    if (filtered.length === 0) {
+      alert("Por favor selecciona al menos un elemento para exportar.");
+      return;
+    }
+
+    onExport(filtered);
+    onClose();
+  };
+
+  const toggleCategory = (cat: string) => {
+    setSelectedCategories(prev => 
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const toggleEvent = (id: string) => {
+    setSelectedEvents(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <motion.div 
+        initial={{ scale: 0.95, opacity: 0 }} 
+        animate={{ scale: 1, opacity: 1 }} 
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+      >
+        <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+          <h2 className="text-xl font-black text-slate-900">Opciones de Exportación</h2>
+          <button onClick={onClose} className="w-8 h-8 hover:bg-white rounded-lg flex items-center justify-center text-slate-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 flex-1 overflow-y-auto space-y-6">
+          <div className="grid grid-cols-3 gap-2">
+            {(['all', 'category', 'individual'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`py-3 px-2 rounded-xl text-[10px] font-bold uppercase tracking-wider border-2 transition-all ${
+                  mode === m 
+                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700' 
+                    : 'border-slate-100 bg-slate-50 text-slate-400 hover:border-slate-200'
+                }`}
+              >
+                {m === 'all' ? 'Todos' : m === 'category' ? 'Categoría' : 'Individual'}
+              </button>
+            ))}
+          </div>
+
+          <AnimatePresence mode="wait">
+            {mode === 'category' && (
+              <motion.div key="cat-selection" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-2">
+                <label className="text-[11px] font-bold text-slate-500 uppercase">Seleccionar Categorías</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {categories.map((cat: any) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => toggleCategory(cat.categoria)}
+                      className={`flex items-center gap-3 p-3 rounded-xl border text-left text-sm font-medium transition-all ${
+                        selectedCategories.includes(cat.categoria)
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center text-white ${selectedCategories.includes(cat.categoria) ? 'bg-indigo-500 border-indigo-500' : 'border-slate-300'}`}>
+                        {selectedCategories.includes(cat.categoria) && <Plus className="w-3 h-3" />}
+                      </div>
+                      <span className="truncate">{cat.categoria}</span>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {mode === 'individual' && (
+              <motion.div key="ind-selection" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-2">
+                <label className="text-[11px] font-bold text-slate-500 uppercase">Seleccionar Eventos</label>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                  {events.map((ev: any) => (
+                    <button
+                      key={ev.id}
+                      onClick={() => toggleEvent(ev.id)}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left text-sm font-medium transition-all ${
+                        selectedEvents.includes(ev.id)
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center text-white ${selectedEvents.includes(ev.id) ? 'bg-indigo-500 border-indigo-500' : 'border-slate-300'}`}>
+                        {selectedEvents.includes(ev.id) && <Plus className="w-3 h-3" />}
+                      </div>
+                      <span className="truncate">{ev.titulo}</span>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="p-6 bg-slate-50 border-t border-slate-200 flex gap-3">
+          <Button variant="ghost" onClick={onClose} className="flex-1">Cancelar</Button>
+          <Button onClick={handleExport} className="flex-1 shadow-lg shadow-indigo-600/20">Generar Reporte</Button>
+        </div>
+      </motion.div>
     </div>
   );
 }
