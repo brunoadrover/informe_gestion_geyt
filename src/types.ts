@@ -38,4 +38,5 @@ export interface Seguimiento {
   recursos: string;
   estado: string;
   observaciones: string;
+  image_url?: string | null;
 }

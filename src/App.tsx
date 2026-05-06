@@ -4,7 +4,7 @@ import {
   Plus, Search, FileText, Settings, History, LogOut, 
   ChevronRight, Calendar, User, Tag, CheckCircle2, 
   Trash2, Edit3, Save, X, ArrowLeft, Download, ShieldCheck,
-  Menu
+  Menu, Image as ImageIcon, Camera
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -150,7 +150,7 @@ export default function App() {
     setView('dashboard');
   };
 
-  const exportPDF = (title: string, data: Evento[]) => {
+  const exportPDF = async (title: string, data: Evento[]) => {
     const doc = new jsPDF();
     const today = format(new Date(), 'dd/MM/yyyy HH:mm');
     
@@ -195,7 +195,7 @@ export default function App() {
       return acc;
     }, {});
 
-    Object.keys(groupedData).sort().forEach(cat => {
+    for (const cat of Object.keys(groupedData).sort()) {
       const eventsInCat = groupedData[cat].sort((a, b) => {
         if (!a.latestEstimate && !b.latestEstimate) return 0;
         if (!a.latestEstimate) return 1;
@@ -212,7 +212,7 @@ export default function App() {
       doc.setFont(undefined, 'normal');
       currentY += 10;
 
-      eventsInCat.forEach((ev) => {
+      for (const ev of eventsInCat) {
         if (currentY > 240) { doc.addPage(); currentY = 20; }
         
         // Event Title & Description
@@ -270,16 +270,22 @@ export default function App() {
         currentY = (doc as any).lastAutoTable.finalY + 1;
 
         if (evSegs.length > 0) {
-          autoTable(doc, {
-            startY: currentY,
-            head: [['Fecha Reporte', 'Fin Est.', 'Responsable', 'Detalle del Avance', 'Estado']],
-            body: evSegs.map(s => [
+          // Prepare rows including potential images
+          const tableRows = await Promise.all(evSegs.map(async (s) => {
+            const row = [
               format(new Date(s.fecha), 'dd/MM/yyyy'),
               s.fecha_finalizacion ? format(new Date(s.fecha_finalizacion), 'dd/MM/yyyy') : 'S/E',
               s.responsable,
               s.descripcion_avance,
               s.estado
-            ]),
+            ];
+            return row;
+          }));
+
+          autoTable(doc, {
+            startY: currentY,
+            head: [['Fecha Reporte', 'Fin Est.', 'Responsable', 'Detalle del Avance', 'Estado']],
+            body: tableRows,
             theme: 'grid',
             headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105] },
             styles: { fontSize: 7, cellPadding: 2 },
@@ -291,18 +297,60 @@ export default function App() {
                 data.cell.styles.textColor = colors.text as any;
                 data.cell.styles.fontStyle = 'bold';
               }
+            },
+            didDrawCell: (data) => {
+              // We'll handle image rendering separately after the table or in a specific way if needed
+              // But for jspdf-autotable, inserting images into cells is possible via didDrawCell
             }
           });
-          currentY = (doc as any).lastAutoTable.finalY + 8;
+          
+          currentY = (doc as any).lastAutoTable.finalY + 2;
+
+          // Add images below the table if they exist for these follow-ups
+          for (const s of evSegs) {
+            if (s.image_url) {
+              try {
+                if (currentY > 240) { doc.addPage(); currentY = 20; }
+                const imgData = await new Promise<string>((resolve, reject) => {
+                  const img = new Image();
+                  img.crossOrigin = "Anonymous";
+                  img.onload = () => {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext("2d");
+                    ctx?.drawImage(img, 0, 0);
+                    resolve(canvas.toDataURL("image/jpeg"));
+                  };
+                  img.onerror = reject;
+                  img.src = s.image_url!;
+                });
+                doc.setFontSize(6);
+                doc.setTextColor(150);
+                doc.text(`Evidencia - ${format(new Date(s.fecha), 'dd/MM/yyyy')}:`, 14, currentY);
+                currentY += 2;
+                // Add image with proportional scaling
+                const imgProps = (doc as any).getImageProperties(imgData);
+                const maxWidth = 60;
+                const imgWidth = Math.min(maxWidth, imgProps.width / 4);
+                const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
+                doc.addImage(imgData, 'JPEG', 14, currentY, imgWidth, imgHeight);
+                currentY += imgHeight + 6;
+              } catch (e) {
+                console.error("Error adding image to PDF", e);
+              }
+            }
+          }
+          currentY += 4;
         } else {
           doc.setFontSize(7);
           doc.setTextColor(150);
           doc.text("Sin registros de seguimiento.", 18, currentY + 4);
           currentY += 10;
         }
-      });
+      }
       currentY += 5;
-    });
+    }
     
     const pageCount = (doc as any).internal.getNumberOfPages();
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -332,6 +380,22 @@ export default function App() {
       const diff = (new Date(s.fecha_finalizacion).getTime() - today.getTime()) / (1000 * 3600 * 24);
       return diff <= 3;
     });
+  };
+
+  const getNearestUrgentDate = (eventId: string) => {
+    const today = new Date();
+    const urgentDates = followUps
+      .filter(s => s.id_eventos === eventId && s.fecha_finalizacion && s.estado !== 'FINALIZADO')
+      .map(s => {
+        const d = new Date(s.fecha_finalizacion!);
+        const diff = (d.getTime() - today.getTime()) / (1000 * 3600 * 24);
+        return { date: d, diff };
+      })
+      .filter(item => item.diff <= 3);
+    
+    if (urgentDates.length === 0) return null;
+    const sorted = urgentDates.sort((a, b) => a.date.getTime() - b.date.getTime());
+    return format(sorted[0].date, 'dd/MM');
   };
 
   const filteredEvents = useMemo(() => {
@@ -536,9 +600,12 @@ export default function App() {
                              <div className="flex justify-between items-start mb-2">
                                <div className="flex items-center gap-2">
                                  {hasUrgentFollowUp(ev.id) && (
-                                   <div className="flex h-2 w-2 relative" title="Urgente">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
+                                   <div className="flex items-center gap-1.5" title="Urgente">
+                                     <div className="flex h-2 w-2 relative">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
+                                     </div>
+                                     <span className="text-[10px] font-black text-red-600 tracking-tighter">{getNearestUrgentDate(ev.id)}</span>
                                    </div>
                                  )}
                                  <h3 className="font-bold text-slate-900 line-clamp-1">{ev.titulo}</h3>
@@ -591,9 +658,12 @@ export default function App() {
                                <td className="px-6 py-4 font-medium text-slate-900 max-w-xs truncate">
                                  <div className="flex items-center gap-2">
                                    {hasUrgentFollowUp(ev.id) && (
-                                     <div className="flex h-2 w-2 relative" title="Este registro tiene seguimientos con menos de 3 días para su finalización estimada">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
+                                     <div className="flex items-center gap-1.5" title="Este registro tiene seguimientos con menos de 3 días para su finalización estimada">
+                                       <div className="flex h-2 w-2 relative">
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
+                                       </div>
+                                       <span className="text-[10px] font-black text-red-600 tracking-tighter">{getNearestUrgentDate(ev.id)}</span>
                                      </div>
                                    )}
                                    {ev.titulo}
@@ -1095,6 +1165,17 @@ function EventDetail({ id, onBack, categories, states, fetchInitialData }: any) 
                   {s.descripcion_avance}
                 </p>
 
+                {s.image_url && (
+                  <div className="mb-4 rounded-lg overflow-hidden border border-slate-100 max-w-sm">
+                    <img 
+                      src={s.image_url} 
+                      alt="Evidencia" 
+                      className="w-full h-auto object-cover hover:scale-105 transition-transform duration-500 cursor-pointer"
+                      onClick={() => window.open(s.image_url!, '_blank')}
+                    />
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 border-t border-slate-50">
                   <div>
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Recursos</span>
@@ -1140,10 +1221,107 @@ function EventDetail({ id, onBack, categories, states, fetchInitialData }: any) 
 
 function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
   const [loading, setLoading] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(followUp?.image_url || null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImageFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const compressImage = async (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 1200;
+          const MAX_HEIGHT = 1200;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob(
+            (blob) => {
+              if (blob) resolve(blob);
+              else reject(new Error('Error al comprimir imagen'));
+            },
+            'image/jpeg',
+            0.7 // Calidad 70%
+          );
+        };
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
   const handleSubmit = async (e: any) => {
     e.preventDefault();
     setLoading(true);
     const fd = new FormData(e.target);
+    
+    let uploadedImageUrl = followUp?.image_url || null;
+
+    if (imageFile) {
+      try {
+        const fileExt = 'jpg'; // Forzamos jpg tras la compresión
+        const fileName = `${Date.now()}-${Math.floor(Math.random() * 1000)}.${fileExt}`;
+        const filePath = `${eventId}/${fileName}`;
+
+        console.log("Comprimiendo y subiendo imagen...", { bucket: 'imagenes', filePath });
+
+        const compressedBlob = await compressImage(imageFile);
+
+        const { error: uploadError } = await supabase.storage
+          .from('imagenes')
+          .upload(filePath, compressedBlob, {
+            contentType: 'image/jpeg',
+            cacheControl: '3600',
+            upsert: false
+          });
+
+        if (uploadError) {
+          console.error("Error detallado de subida:", uploadError);
+          alert(`Error al subir la imagen: ${uploadError.message}`);
+          setLoading(false);
+          return; 
+        } else {
+          const { data } = supabase.storage
+            .from('imagenes')
+            .getPublicUrl(filePath);
+          
+          uploadedImageUrl = data.publicUrl;
+        }
+      } catch (err) {
+        console.error("Error en el proceso de imagen:", err);
+        alert("Error al procesar la imagen antes de subir.");
+        setLoading(false);
+        return;
+      }
+    }
+
     const payload = {
       id_eventos: eventId,
       responsable: fd.get('responsable'),
@@ -1152,7 +1330,8 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
       fecha_finalizacion: fd.get('fecha_finalizacion') || null,
       recursos: fd.get('recursos'),
       estado: fd.get('estado'),
-      observaciones: fd.get('observaciones')
+      observaciones: fd.get('observaciones'),
+      image_url: uploadedImageUrl
     };
     
     let error;
@@ -1170,7 +1349,7 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
 
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden overflow-y-auto max-h-[90vh]">
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden overflow-y-auto max-h-[95vh]">
         <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
           <h3 className="font-bold text-xl tracking-tight text-slate-900">
             {followUp ? 'Editar Avance' : 'Nuevo Avance'}
@@ -1184,9 +1363,39 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
           </div>
           <Input name="responsable" label="Responsable del Avance" placeholder="Nombre completo" required icon={User} defaultValue={followUp?.responsable || ''} />
           <Select name="estado" label="Estado Actual" options={states} required defaultValue={followUp?.estado || ''} />
+          
           <div className="flex flex-col gap-1">
             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">Resumen de Actividades</label>
             <textarea name="descripcion" rows={4} className="w-full bg-slate-50 border border-slate-200 rounded-md p-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800" required placeholder="Describe qué se avanzó en este periodo..." defaultValue={followUp?.descripcion_avance || ''} />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Evidencia Fotográfica</label>
+            <div className="flex items-center gap-4 p-3 border-2 border-dashed border-slate-200 rounded-xl hover:border-indigo-300 transition-colors bg-slate-50">
+              <label className="cursor-pointer flex flex-col items-center justify-center w-24 h-24 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 transition-colors">
+                <Camera className="w-6 h-6 text-slate-400 mb-1" />
+                <span className="text-[9px] font-bold text-slate-500 uppercase">Capturar</span>
+                <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+              </label>
+              
+              {previewUrl ? (
+                <div className="relative group w-24 h-24 rounded-lg overflow-hidden border border-slate-200 shadow-sm">
+                  <img src={previewUrl} className="w-full h-full object-cover" alt="Vista previa" />
+                  <button 
+                    type="button" 
+                    onClick={() => { setImageFile(null); setPreviewUrl(null); }}
+                    className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex-1 text-center py-4">
+                  <ImageIcon className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                  <p className="text-[10px] text-slate-400 font-medium">No se ha seleccionado ninguna imagen</p>
+                </div>
+              )}
+            </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input name="recursos" label="Recursos" placeholder="Ej. Licencias, API" defaultValue={followUp?.recursos || ''} />
