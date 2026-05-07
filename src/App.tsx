@@ -77,7 +77,8 @@ export default function App() {
   const [events, setEvents] = useState<Evento[]>([]);
   const [categories, setCategories] = useState<Categoria[]>([]);
   const [states, setStates] = useState<Estado[]>([]);
-  const [followUps, setFollowUps] = useState<Seguimiento[]>([]); // New global follow-ups state
+  const [followUps, setFollowUps] = useState<Seguimiento[]>([]); 
+  const [reportIntro, setReportIntro] = useState<string>("Introducción: El presente documento muestra el progreso de las diversas líneas de gestión en las que participo. Los elementos han sido categorizados y sus avances ordenados por fecha estimada de finalización (de la más lejana a la más próxima), con el objetivo de optimizar el seguimiento mediante la generación alertas automáticas que garanticen la trazabilidad de cada proceso.");
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -95,16 +96,26 @@ export default function App() {
   const fetchInitialData = async () => {
     setDataLoading(true);
     try {
+      // Cargamos los datos principales primero
       const [{ data: evs }, { data: cats }, { data: sts }, { data: segs }] = await Promise.all([
         supabase.from('eventos').select('*').order('fecha_inicio', { ascending: false }),
         supabase.from('categorias').select('*'),
         supabase.from('estado').select('*'),
         supabase.from('seguimiento').select('*').order('fecha', { ascending: false })
       ]);
+      
       setEvents(evs || []);
       setCategories(cats || []);
       setStates(sts || []);
       setFollowUps(segs || []);
+
+      // Intentamos cargar la configuración de forma independiente
+      try {
+        const { data: config } = await supabase.from('configuracion').select('*').eq('id', 'report_intro').maybeSingle();
+        if (config) setReportIntro(config.valor);
+      } catch (configError) {
+        console.warn("La tabla 'configuracion' no está lista o no existe todavía:", configError);
+      }
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -166,8 +177,7 @@ export default function App() {
     doc.setFontSize(8.5);
     doc.setFont("helvetica", "italic");
     doc.setTextColor(100, 116, 139); // slate-500
-    const introText = "Introducción: El presente documento muestra el progreso de las diversas líneas de gestión en las que participo. Los elementos han sido categorizados y sus avances ordenados por fecha estimada de finalización (de la más lejana a la más próxima), con el objetivo de optimizar el seguimiento mediante la generación alertas automáticas que garanticen la trazabilidad de cada proceso.";
-    const splitIntro = doc.splitTextToSize(introText, 182);
+    const splitIntro = doc.splitTextToSize(reportIntro, 182);
     doc.text(splitIntro, 14, 38);
     
     let currentY = 38 + (splitIntro.length * 4) + 8;
@@ -564,7 +574,13 @@ export default function App() {
                 fetchInitialData={fetchInitialData}
               />
             ) : view === 'config' ? (
-              <ConfigView key="config" categories={categories} fetchInitialData={fetchInitialData} />
+              <ConfigView 
+                key="config" 
+                categories={categories} 
+                fetchInitialData={fetchInitialData} 
+                reportIntro={reportIntro}
+                setReportIntro={setReportIntro}
+              />
             ) : (
               <motion.div 
                 key="list"
@@ -1411,13 +1427,33 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
   );
 }
 
-function ConfigView({ categories, fetchInitialData }: any) {
+function ConfigView({ categories, fetchInitialData, reportIntro, setReportIntro }: any) {
   const [users, setUsers] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(false);
+  const [introText, setIntroText] = useState(reportIntro);
+  const [savingIntro, setSavingIntro] = useState(false);
   
   useEffect(() => {
     supabase.from('usuarios').select('*').then(({ data }) => setUsers(data || []));
   }, []);
+
+  const saveIntro = async () => {
+    setSavingIntro(true);
+    try {
+      const { error } = await supabase
+        .from('configuracion')
+        .upsert({ id: 'report_intro', valor: introText });
+      
+      if (error) throw error;
+      setReportIntro(introText);
+      alert("Introducción de reporte actualizada correctamente.");
+    } catch (err: any) {
+      console.error("Error saving intro:", err);
+      alert("Error al guardar la configuración: " + err.message);
+    } finally {
+      setSavingIntro(false);
+    }
+  };
 
   const addCategory = async (e: any) => {
     e.preventDefault();
@@ -1459,7 +1495,31 @@ function ConfigView({ categories, fetchInitialData }: any) {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10 lg:max-w-6xl mx-auto">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10 lg:max-w-6xl mx-auto pb-10">
+      <section className="flex flex-col gap-6 md:gap-8 lg:col-span-2">
+        <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[3rem] border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-6 md:mb-8 border-b border-slate-50 pb-4">
+            <h3 className="text-xl md:text-2xl font-black">Personalización del Reporte PDF</h3>
+            <Button onClick={saveIntro} disabled={savingIntro || introText === reportIntro} className="text-xs md:text-sm shadow-indigo-600/10">
+              <Save className="w-4 h-4" /> {savingIntro ? 'Guardando...' : 'Guardar Cambios'}
+            </Button>
+          </div>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none">Texto de Introducción</label>
+              <p className="text-xs text-slate-400 mb-2 font-medium">Este texto aparecerá al inicio de todos los reportes generados.</p>
+              <textarea 
+                value={introText} 
+                onChange={(e) => setIntroText(e.target.value)}
+                rows={4} 
+                className="w-full bg-slate-50 border border-slate-200 rounded-md p-4 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all leading-relaxed"
+                placeholder="Escribe aquí la introducción para los reportes..."
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="flex flex-col gap-6 md:gap-8">
         <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[3rem] border border-slate-200 shadow-sm">
           <h3 className="text-xl md:text-2xl font-black mb-6 md:mb-8 border-b border-slate-50 pb-4">Gestión de Categorías</h3>

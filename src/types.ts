@@ -40,3 +40,8 @@ export interface Seguimiento {
   observaciones: string;
   image_url?: string | null;
 }
+
+export interface Configuracion {
+  id: string;
+  valor: string;
+}
