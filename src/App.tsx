@@ -331,8 +331,8 @@ export default function App() {
                 currentY += 2;
                 // Add image with proportional scaling
                 const imgProps = (doc as any).getImageProperties(imgData);
-                const maxWidth = 60;
-                const imgWidth = Math.min(maxWidth, imgProps.width / 4);
+                const maxWidth = 180;
+                const imgWidth = Math.min(maxWidth, (imgProps.width / 4) * 3);
                 const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
                 doc.addImage(imgData, 'JPEG', 14, currentY, imgWidth, imgHeight);
                 currentY += imgHeight + 6;
