@@ -92,39 +92,58 @@ export default function App() {
   useEffect(() => {
     const savedUser = localStorage.getItem('gest_user');
     if (savedUser) setUser(JSON.parse(savedUser));
-    fetchInitialData();
   }, []);
 
+  useEffect(() => {
+    if (user) {
+      fetchInitialData();
+    }
+  }, [user]);
+
   const fetchInitialData = async () => {
+    if (!user) return;
     setDataLoading(true);
     try {
-      // Cargamos los datos principales primero
-      const [{ data: evs }, { data: cats }, { data: sts }, { data: segs }] = await Promise.all([
-        supabase.from('eventos').select('*').order('fecha_inicio', { ascending: false }),
+      // 1. Cargamos datos que no dependen de la sesión de forma paralela
+      const [{ data: cats }, { data: sts }, { data: configs }] = await Promise.all([
         supabase.from('categorias').select('*'),
         supabase.from('estado').select('*'),
-        supabase.from('seguimiento').select('*').order('fecha', { ascending: false })
+        supabase.from('configuracion').select('*').then(res => res, () => ({ data: null }))
       ]);
       
-      setEvents(evs || []);
       setCategories(cats || []);
       setStates(sts || []);
-      setFollowUps(segs || []);
 
-      // Intentamos cargar la configuración de forma independiente
-      try {
-        const { data: configs } = await supabase.from('configuracion').select('*');
-        if (configs) {
-          const intro = configs.find(c => c.id === 'report_intro');
-          const title = configs.find(c => c.id === 'report_title');
-          const logo = configs.find(c => c.id === 'report_logo_url');
-          
-          if (intro) setReportIntro(intro.valor);
-          if (title) setReportTitle(title.valor);
-          if (logo && logo.valor) setReportLogoUrl(logo.valor);
-        }
-      } catch (configError) {
-        console.warn("La tabla 'configuracion' no está lista o no existe todavía:", configError);
+      if (configs) {
+        const intro = configs.find(c => c.id === 'report_intro');
+        const title = configs.find(c => c.id === 'report_title');
+        const logo = configs.find(c => c.id === 'report_logo_url');
+        
+        if (intro) setReportIntro(intro.valor);
+        if (title) setReportTitle(title.valor);
+        if (logo && logo.valor) setReportLogoUrl(logo.valor);
+      }
+
+      // 2. Cargamos datos específicos del usuario
+      const { data: evs } = await supabase
+        .from('eventos')
+        .select('*')
+        .eq('usuario_id', user.id)
+        .order('fecha_inicio', { ascending: false });
+      
+      const userEvents = evs || [];
+      setEvents(userEvents);
+
+      if (userEvents.length > 0) {
+        const eventIds = userEvents.map(e => e.id);
+        const { data: segs } = await supabase
+          .from('seguimiento')
+          .select('*')
+          .in('id_eventos', eventIds)
+          .order('fecha', { ascending: false });
+        setFollowUps(segs || []);
+      } else {
+        setFollowUps([]);
       }
     } catch (error) {
       console.error("Error fetching data:", error);
