@@ -4,7 +4,7 @@ import {
   Plus, Search, FileText, Settings, History, LogOut, 
   ChevronRight, Calendar, User, Tag, CheckCircle2, 
   Trash2, Edit3, Save, X, ArrowLeft, Download, ShieldCheck,
-  Menu, Image as ImageIcon, Camera
+  Menu, Image as ImageIcon, Camera, ImagePlus
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -79,6 +79,8 @@ export default function App() {
   const [states, setStates] = useState<Estado[]>([]);
   const [followUps, setFollowUps] = useState<Seguimiento[]>([]); 
   const [reportIntro, setReportIntro] = useState<string>("Introducción: El presente documento muestra el progreso de las diversas líneas de gestión en las que participo. Los elementos han sido categorizados y sus avances ordenados por fecha estimada de finalización (de la más lejana a la más próxima), con el objetivo de optimizar el seguimiento mediante la generación alertas automáticas que garanticen la trazabilidad de cada proceso.");
+  const [reportTitle, setReportTitle] = useState<string>("REPORTE ESTRATÉGICO DE GESTIÓN Y SEGUIMIENTO");
+  const [reportLogoUrl, setReportLogoUrl] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -111,8 +113,16 @@ export default function App() {
 
       // Intentamos cargar la configuración de forma independiente
       try {
-        const { data: config } = await supabase.from('configuracion').select('*').eq('id', 'report_intro').maybeSingle();
-        if (config) setReportIntro(config.valor);
+        const { data: configs } = await supabase.from('configuracion').select('*');
+        if (configs) {
+          const intro = configs.find(c => c.id === 'report_intro');
+          const title = configs.find(c => c.id === 'report_title');
+          const logo = configs.find(c => c.id === 'report_logo_url');
+          
+          if (intro) setReportIntro(intro.valor);
+          if (title) setReportTitle(title.valor);
+          if (logo && logo.valor) setReportLogoUrl(logo.valor);
+        }
       } catch (configError) {
         console.warn("La tabla 'configuracion' no está lista o no existe todavía:", configError);
       }
@@ -161,26 +171,71 @@ export default function App() {
     setView('dashboard');
   };
 
-  const exportPDF = async (title: string, data: Evento[]) => {
+  const exportPDF = async (titleParam: string, data: Evento[]) => {
     const doc = new jsPDF();
     const today = format(new Date(), 'dd/MM/yyyy HH:mm');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
     
-    doc.setFontSize(18);
+    // --- PÁGINA 1: PORTADA ---
+    
+    const logoWidth = 40;
+    let logoHeight = 0;
+    if (reportLogoUrl) {
+      try {
+        const imgData = await new Promise<string>((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = "Anonymous";
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0);
+            resolve(canvas.toDataURL('image/jpeg'));
+          };
+          img.onerror = reject;
+          img.src = reportLogoUrl;
+        });
+        const imgProps = (doc as any).getImageProperties(imgData);
+        logoHeight = (imgProps.height * logoWidth) / imgProps.width;
+        doc.addImage(imgData, 'JPEG', (pageWidth - logoWidth) / 2, 20, logoWidth, logoHeight);
+      } catch (e) {
+        console.error("No se pudo cargar el logo para el PDF", e);
+      }
+    }
+
+    // 2. Título Centrado y Destacado
+    doc.setFontSize(24);
     doc.setTextColor(15, 23, 42); // slate-900
-    doc.text(title, 14, 20);
+    doc.setFont("helvetica", "bold");
+    const fullTitle = reportTitle || titleParam;
+    const splitTitle = doc.splitTextToSize(fullTitle, 160);
+    const titleY = logoHeight > 0 ? 20 + logoHeight + 15 : 40;
+    doc.text(splitTitle, pageWidth / 2, titleY, { align: 'center' });
     
+    // 3. Introducción: Centrado Verticalmente, Alineado Izquierda, Fuente Mayor y Más Oscura
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(30, 41, 59); // slate-800 (más oscuro)
+    const introText = reportIntro;
+    const splitIntro = doc.splitTextToSize(introText, 150);
+    const introLineHeight = 7;
+    const totalIntroHeight = splitIntro.length * introLineHeight;
+    const introY = (pageHeight - totalIntroHeight) / 2;
+    
+    doc.text(splitIntro, 30, introY);
+    
+    // 4. Generado por: Al final de la página a la derecha
     doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139); // slate-500
-    doc.text(`Generado por: ${user?.nombre || 'Sistema'} | ${today}`, 14, 28);
-    
-    // Introducción
-    doc.setFontSize(8.5);
     doc.setFont("helvetica", "italic");
     doc.setTextColor(100, 116, 139); // slate-500
-    const splitIntro = doc.splitTextToSize(reportIntro, 182);
-    doc.text(splitIntro, 14, 38);
-    
-    let currentY = 38 + (splitIntro.length * 4) + 8;
+    const footerText = `Generado por: ${user?.nombre || 'Sistema'} | ${today}`;
+    doc.text(footerText, pageWidth - 14, pageHeight - 20, { align: 'right' });
+
+    // --- FIN PÁGINA 1 ---
+
+    let currentY = 20;
 
     // Helper for status colors in PDF
     const getStatusColors = (status: string) => {
@@ -213,11 +268,11 @@ export default function App() {
         return new Date(b.latestEstimate).getTime() - new Date(a.latestEstimate).getTime();
       });
 
-      if (currentY > 260) { doc.addPage(); currentY = 20; }
+      doc.addPage(); 
+      currentY = 20;
       doc.setFontSize(12);
       doc.setTextColor(79, 70, 229); // indigo-600
       doc.setFont(undefined, 'bold');
-      const pageWidth = doc.internal.pageSize.getWidth();
       doc.text(`Categoría: ${cat}`, pageWidth / 2, currentY + 5, { align: 'center' });
       doc.setFont(undefined, 'normal');
       currentY += 10;
@@ -320,7 +375,6 @@ export default function App() {
           for (const s of evSegs) {
             if (s.image_url) {
               try {
-                if (currentY > 240) { doc.addPage(); currentY = 20; }
                 const imgData = await new Promise<string>((resolve, reject) => {
                   const img = new Image();
                   img.crossOrigin = "Anonymous";
@@ -335,15 +389,24 @@ export default function App() {
                   img.onerror = reject;
                   img.src = s.image_url!;
                 });
+                // Add image with proportional scaling
+                const imgProps = (doc as any).getImageProperties(imgData);
+                const maxWidth = 180;
+                // Reducimos al 80% del valor anterior
+                const imgWidth = Math.min(maxWidth, (imgProps.width / 4) * 3) * 0.8;
+                const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
+
+                // Verificamos si cabe en la página actual
+                if (currentY + imgHeight + 10 > 280) { 
+                  doc.addPage(); 
+                  currentY = 20; 
+                }
+
                 doc.setFontSize(6);
                 doc.setTextColor(150);
                 doc.text(`Evidencia - ${format(new Date(s.fecha), 'dd/MM/yyyy')}:`, 14, currentY);
                 currentY += 2;
-                // Add image with proportional scaling
-                const imgProps = (doc as any).getImageProperties(imgData);
-                const maxWidth = 180;
-                const imgWidth = Math.min(maxWidth, (imgProps.width / 4) * 3);
-                const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
+
                 doc.addImage(imgData, 'JPEG', 14, currentY, imgWidth, imgHeight);
                 currentY += imgHeight + 6;
               } catch (e) {
@@ -363,7 +426,6 @@ export default function App() {
     }
     
     const pageCount = (doc as any).internal.getNumberOfPages();
-    const pageWidth = doc.internal.pageSize.getWidth();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
       doc.setFontSize(8);
@@ -371,7 +433,7 @@ export default function App() {
       doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
     }
     
-    doc.save(`${title.toLowerCase().replace(/\s/g, '_')}_${format(new Date(), 'yyyyMMdd')}.pdf`);
+    doc.save(`${(reportTitle || titleParam).toLowerCase().replace(/\s/g, '_')}_${format(new Date(), 'yyyyMMdd')}.pdf`);
   };
 
   const urgentCount = useMemo(() => {
@@ -580,6 +642,10 @@ export default function App() {
                 fetchInitialData={fetchInitialData} 
                 reportIntro={reportIntro}
                 setReportIntro={setReportIntro}
+                reportTitle={reportTitle}
+                setReportTitle={setReportTitle}
+                reportLogoUrl={reportLogoUrl}
+                setReportLogoUrl={setReportLogoUrl}
               />
             ) : (
               <motion.div 
@@ -1427,31 +1493,72 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
   );
 }
 
-function ConfigView({ categories, fetchInitialData, reportIntro, setReportIntro }: any) {
+function ConfigView({ categories, fetchInitialData, reportIntro, setReportIntro, reportTitle, setReportTitle, reportLogoUrl, setReportLogoUrl }: any) {
   const [users, setUsers] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(false);
   const [introText, setIntroText] = useState(reportIntro);
-  const [savingIntro, setSavingIntro] = useState(false);
+  const [titleText, setTitleText] = useState(reportTitle);
+  const [logoPreview, setLogoPreview] = useState(reportLogoUrl);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
   
   useEffect(() => {
     supabase.from('usuarios').select('*').then(({ data }) => setUsers(data || []));
   }, []);
 
-  const saveIntro = async () => {
-    setSavingIntro(true);
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setLogoFile(file);
+      setLogoPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const saveReportConfig = async () => {
+    setSavingConfig(true);
     try {
+      let finalLogoUrl = reportLogoUrl;
+
+      if (logoFile) {
+        const fileExt = logoFile.name.split('.').pop();
+        const fileName = `logo-${Date.now()}.${fileExt}`;
+        const filePath = `config/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('imagenes')
+          .upload(filePath, logoFile);
+
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage
+          .from('imagenes')
+          .getPublicUrl(filePath);
+        
+        finalLogoUrl = publicUrlData.publicUrl;
+      }
+
+      const updates = [
+        { id: 'report_intro', valor: introText },
+        { id: 'report_title', valor: titleText },
+        { id: 'report_logo_url', valor: finalLogoUrl || '' }
+      ];
+
       const { error } = await supabase
         .from('configuracion')
-        .upsert({ id: 'report_intro', valor: introText });
+        .upsert(updates);
       
       if (error) throw error;
+      
       setReportIntro(introText);
-      alert("Introducción de reporte actualizada correctamente.");
+      setReportTitle(titleText);
+      setReportLogoUrl(finalLogoUrl);
+      
+      alert("Configuración de reporte actualizada correctamente.");
     } catch (err: any) {
-      console.error("Error saving intro:", err);
+      console.error("Error saving config:", err);
       alert("Error al guardar la configuración: " + err.message);
     } finally {
-      setSavingIntro(false);
+      setSavingConfig(false);
     }
   };
 
@@ -1496,25 +1603,66 @@ function ConfigView({ categories, fetchInitialData, reportIntro, setReportIntro 
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10 lg:max-w-6xl mx-auto pb-10">
-      <section className="flex flex-col gap-6 md:gap-8 lg:col-span-2">
+      <section className="flex flex-col gap-6 md:gap-10 lg:col-span-2">
         <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[3rem] border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-6 md:mb-8 border-b border-slate-50 pb-4">
-            <h3 className="text-xl md:text-2xl font-black">Personalización del Reporte PDF</h3>
-            <Button onClick={saveIntro} disabled={savingIntro || introText === reportIntro} className="text-xs md:text-sm shadow-indigo-600/10">
-              <Save className="w-4 h-4" /> {savingIntro ? 'Guardando...' : 'Guardar Cambios'}
+          <div className="flex items-center justify-between mb-8 md:mb-10 border-b border-slate-50 pb-6">
+            <div>
+              <h3 className="text-xl md:text-2xl font-black">Personalización del Reporte PDF</h3>
+              <p className="text-sm text-slate-500 mt-1">Ajusta la identidad visual y el contenido de tus informes exportados.</p>
+            </div>
+            <Button onClick={saveReportConfig} disabled={savingConfig} className="text-xs md:text-sm shadow-indigo-600/10">
+              <Save className="w-4 h-4" /> {savingConfig ? 'Guardando...' : 'Guardar Todo'}
             </Button>
           </div>
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none">Texto de Introducción</label>
-              <p className="text-xs text-slate-400 mb-2 font-medium">Este texto aparecerá al inicio de todos los reportes generados.</p>
-              <textarea 
-                value={introText} 
-                onChange={(e) => setIntroText(e.target.value)}
-                rows={4} 
-                className="w-full bg-slate-50 border border-slate-200 rounded-md p-4 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all leading-relaxed"
-                placeholder="Escribe aquí la introducción para los reportes..."
-              />
+          
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 md:gap-12">
+            <div className="lg:col-span-2 space-y-6">
+              <div className="flex flex-col gap-2">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none">Título del Reporte</label>
+                <input 
+                  type="text"
+                  value={titleText}
+                  onChange={(e) => setTitleText(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-md p-4 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  placeholder="Ej. REPORTE MENSUAL DE ACTIVIDADES"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none">Texto de Introducción</label>
+                <textarea 
+                  value={introText} 
+                  onChange={(e) => setIntroText(e.target.value)}
+                  rows={6} 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-md p-4 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all leading-relaxed"
+                  placeholder="Escribe aquí la introducción para los reportes..."
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none">Logo Institucional</label>
+              <div className="relative group">
+                <div className="w-full aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center p-6 transition-all group-hover:border-indigo-300">
+                  {logoPreview ? (
+                    <img src={logoPreview} alt="Logo preview" className="max-w-full max-h-full object-contain rounded-lg" />
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 text-slate-400">
+                      <ImagePlus className="w-10 h-10 stroke-1" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Subir Logo</span>
+                    </div>
+                  )}
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={handleLogoChange}
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                  />
+                </div>
+                {logoPreview && (
+                   <p className="text-[9px] text-slate-400 mt-2 text-center italic font-medium">Haz click para cambiar la imagen actual</p>
+                )}
+              </div>
             </div>
           </div>
         </div>
