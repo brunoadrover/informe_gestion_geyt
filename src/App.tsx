@@ -1385,7 +1385,28 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
     
     let uploadedImageUrl = followUp?.image_url || null;
 
-    if (imageFile) {
+    if (!previewUrl) {
+      if (followUp?.image_url) {
+        try {
+          const decodedUrl = decodeURIComponent(followUp.image_url);
+          const bucketSearchStr = "/public/imagenes/";
+          const bucketIndex = decodedUrl.indexOf(bucketSearchStr);
+          if (bucketIndex !== -1) {
+            const filePath = decodedUrl.substring(bucketIndex + bucketSearchStr.length);
+            console.log("Eliminando archivo del bucket:", filePath);
+            const { error: removeError } = await supabase.storage
+              .from('imagenes')
+              .remove([filePath]);
+            if (removeError) {
+              console.warn("No se pudo eliminar el archivo del bucket o ya no existía:", removeError);
+            }
+          }
+        } catch (storageErr) {
+          console.error("Error al intentar eliminar el archivo del bucket de almacenamiento:", storageErr);
+        }
+      }
+      uploadedImageUrl = null;
+    } else if (imageFile) {
       try {
         const fileExt = 'jpg'; // Forzamos jpg tras la compresión
         const fileName = `${Date.now()}-${Math.floor(Math.random() * 1000)}.${fileExt}`;
