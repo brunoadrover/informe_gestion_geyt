@@ -105,10 +105,11 @@ export default function App() {
     setDataLoading(true);
     try {
       // 1. Cargamos datos que no dependen de la sesión de forma paralela
-      const [{ data: cats }, { data: sts }, { data: configs }] = await Promise.all([
+      const [{ data: cats }, { data: sts }, { data: configs }, { data: allUsers }] = await Promise.all([
         supabase.from('categorias').select('*'),
         supabase.from('estado').select('*'),
-        supabase.from('configuracion').select('*').then(res => res, () => ({ data: null }))
+        supabase.from('configuracion').select('*').then(res => res, () => ({ data: null })),
+        supabase.from('usuarios').select('id, nombre, correo').then(res => res, () => ({ data: null }))
       ]);
       
       setCategories(cats || []);
@@ -124,11 +125,44 @@ export default function App() {
         if (logo && logo.valor) setReportLogoUrl(logo.valor);
       }
 
-      // 2. Cargamos datos específicos del usuario
+      // 2. Determinamos los IDs de usuarios asociados
+      // Jorge Zecchin y Martin Adrover comparten la visualización de los mismos registros
+      const currentUserName = (user.nombre || '').toLowerCase();
+      const currentUserEmail = (user.correo || '').toLowerCase();
+
+      const isJorgeZecchin = 
+        currentUserName.includes('zecchin') || 
+        currentUserEmail.includes('jzecchin') || 
+        user.id === 'e84ad633-03c7-48d9-9f3c-397c54277bf0';
+
+      const isMartinAdrover = 
+        currentUserName.includes('adrover') || 
+        currentUserEmail.includes('madrover') || 
+        user.id === 'ee3b9b6a-aaf2-41e6-8e89-2f05104883d0';
+
+      let targetUserIds = [user.id];
+
+      if (isJorgeZecchin || isMartinAdrover) {
+        const martinUser = allUsers?.find(u => 
+          u.nombre?.toLowerCase().includes('adrover') || 
+          u.correo?.toLowerCase().includes('madrover')
+        );
+        const jorgeUser = allUsers?.find(u => 
+          u.nombre?.toLowerCase().includes('zecchin') || 
+          u.correo?.toLowerCase().includes('jzecchin')
+        );
+
+        const martinId = martinUser?.id || 'ee3b9b6a-aaf2-41e6-8e89-2f05104883d0';
+        const jorgeId = jorgeUser?.id || 'e84ad633-03c7-48d9-9f3c-397c54277bf0';
+
+        targetUserIds = Array.from(new Set([user.id, martinId, jorgeId]));
+      }
+
+      // 3. Cargamos los eventos de los usuarios correspondientes
       const { data: evs } = await supabase
         .from('eventos')
         .select('*')
-        .eq('usuario_id', user.id)
+        .in('usuario_id', targetUserIds)
         .order('fecha_inicio', { ascending: false });
       
       const userEvents = evs || [];
