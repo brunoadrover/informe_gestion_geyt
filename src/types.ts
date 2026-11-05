@@ -28,12 +28,12 @@ export interface Evento {
   usuario_id: string;
 }
 
-export interface Seguimiento {
+export interface Tema {
   id: string;
   id_eventos: string;
   responsable: string;
   fecha: string;
-  descripcion_avance: string;
+  subtitulo: string;
   fecha_finalizacion: string | null;
   recursos: string;
   estado: string;
@@ -41,7 +41,22 @@ export interface Seguimiento {
   image_url?: string | null;
 }
 
+// Seguimiento mantenido por compatibilidad
+export interface Seguimiento extends Tema {
+  descripcion_avance?: string;
+}
+
+export interface Avance {
+  id: string;
+  id_temas: string;
+  fecha: string;
+  responsable: string | null;
+  descripcion: string;
+  importancia?: string;
+}
+
 export interface Configuracion {
   id: string;
   valor: string;
 }
+

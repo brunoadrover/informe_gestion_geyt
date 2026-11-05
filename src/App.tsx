@@ -9,7 +9,7 @@ import {
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { supabase } from './lib/supabase';
-import type { Evento, Seguimiento, Usuario, Categoria, Estado } from './types';
+import type { Evento, Seguimiento, Tema, Avance, Usuario, Categoria, Estado } from './types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -60,6 +60,37 @@ const Select = ({ label, options, ...props }: any) => (
   </div>
 );
 
+const ImportanciaBadge = ({ importancia }: { importancia?: string }) => {
+  const imp = (importancia || 'MEDIA').toUpperCase();
+  if (imp === 'URGENTE') {
+    return (
+      <span className="bg-red-600 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded shadow-xs inline-flex items-center gap-1 tracking-wider">
+        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+        URGENTE
+      </span>
+    );
+  }
+  if (imp === 'ALTA') {
+    return (
+      <span className="bg-rose-100 text-rose-700 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded">
+        ALTA
+      </span>
+    );
+  }
+  if (imp === 'BAJA') {
+    return (
+      <span className="bg-slate-100 text-slate-600 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded">
+        BAJA
+      </span>
+    );
+  }
+  return (
+    <span className="bg-amber-100 text-amber-700 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded">
+      MEDIA
+    </span>
+  );
+};
+
 // --- Utility Functions ---
 
 const isUrgentReport = (s: Seguimiento | any) => {
@@ -77,7 +108,8 @@ export default function App() {
   const [events, setEvents] = useState<Evento[]>([]);
   const [categories, setCategories] = useState<Categoria[]>([]);
   const [states, setStates] = useState<Estado[]>([]);
-  const [followUps, setFollowUps] = useState<Seguimiento[]>([]); 
+  const [followUps, setFollowUps] = useState<Tema[]>([]); 
+  const [avances, setAvances] = useState<Avance[]>([]); 
   const [reportIntro, setReportIntro] = useState<string>("Introducción: El presente documento muestra el progreso de las diversas líneas de gestión en las que participo. Los elementos han sido categorizados y sus avances ordenados por fecha estimada de finalización (de la más lejana a la más próxima), con el objetivo de optimizar el seguimiento mediante la generación alertas automáticas que garanticen la trazabilidad de cada proceso.");
   const [reportTitle, setReportTitle] = useState<string>("REPORTE ESTRATÉGICO DE GESTIÓN Y SEGUIMIENTO");
   const [reportLogoUrl, setReportLogoUrl] = useState<string | null>(null);
@@ -170,14 +202,32 @@ export default function App() {
 
       if (userEvents.length > 0) {
         const eventIds = userEvents.map(e => e.id);
-        const { data: segs } = await supabase
-          .from('seguimiento')
+        const { data: temasData } = await supabase
+          .from('temas')
           .select('*')
           .in('id_eventos', eventIds)
           .order('fecha', { ascending: false });
-        setFollowUps(segs || []);
+        
+        const mappedTemas = (temasData || []).map(t => ({
+          ...t,
+          descripcion_avance: t.subtitulo
+        }));
+        setFollowUps(mappedTemas);
+
+        const temaIds = mappedTemas.map(t => t.id);
+        if (temaIds.length > 0) {
+          const { data: avs } = await supabase
+            .from('avances')
+            .select('*')
+            .in('id_temas', temaIds)
+            .order('fecha', { ascending: false });
+          setAvances(avs || []);
+        } else {
+          setAvances([]);
+        }
       } else {
         setFollowUps([]);
+        setAvances([]);
       }
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -290,13 +340,98 @@ export default function App() {
 
     let currentY = 20;
 
+    // Helper for page overflow management
+    const ensureSpace = (neededHeight: number) => {
+      if (currentY + neededHeight > 268) {
+        doc.addPage();
+        currentY = 20;
+        return true;
+      }
+      return false;
+    };
+
     // Helper for status colors in PDF
     const getStatusColors = (status: string) => {
-      const s = status.toUpperCase();
-      if (s === 'FINALIZADO') return { fill: [209, 250, 229], text: [6, 78, 59] }; // Green
-      if (s === 'EN PROCESO') return { fill: [254, 243, 199], text: [146, 64, 14] }; // Yellow/Amber
-      if (s === 'ABANDONADO') return { fill: [254, 226, 226], text: [153, 27, 27] }; // Red
-      return { fill: [224, 231, 255], text: [49, 46, 129] }; // Blue/Default
+      const s = (status || '').toUpperCase();
+      if (s === 'FINALIZADO') return { fill: [209, 250, 229], text: [6, 78, 59], border: [16, 185, 129] }; // Green
+      if (s === 'EN PROCESO') return { fill: [254, 243, 199], text: [146, 64, 14], border: [245, 158, 11] }; // Amber
+      if (s === 'ABANDONADO') return { fill: [254, 226, 226], text: [153, 27, 27], border: [239, 68, 68] }; // Red
+      return { fill: [224, 231, 255], text: [49, 46, 129], border: [99, 102, 241] }; // Indigo
+    };
+
+    // Helper to draw status badge in PDF
+    const drawStatusBadge = (status: string, x: number, y: number): number => {
+      const colors = getStatusColors(status);
+      const text = (status || 'EN PROCESO').toUpperCase();
+      doc.setFontSize(6.5);
+      doc.setFont("helvetica", "bold");
+      const textWidth = doc.getTextWidth(text);
+      const badgeWidth = textWidth + 4;
+      const badgeHeight = 4.2;
+
+      doc.setFillColor(colors.fill[0], colors.fill[1], colors.fill[2]);
+      doc.setDrawColor(colors.border[0], colors.border[1], colors.border[2]);
+      doc.setLineWidth(0.2);
+      doc.roundedRect(x, y - 3.2, badgeWidth, badgeHeight, 1, 1, 'FD');
+
+      doc.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
+      doc.text(text, x + badgeWidth / 2, y - 0.2, { align: 'center' });
+      return badgeWidth;
+    };
+
+    // Helper for importance colors in PDF
+    const getImportanceBadgeStyles = (importancia?: string) => {
+      const imp = (importancia || 'MEDIA').toUpperCase();
+      if (imp === 'URGENTE') {
+        return {
+          fill: [254, 226, 226],   // red-100
+          border: [239, 68, 68],   // red-500
+          text: [185, 28, 28],     // red-700
+          label: 'URGENTE'
+        };
+      }
+      if (imp === 'ALTA') {
+        return {
+          fill: [255, 228, 230],   // rose-100
+          border: [244, 63, 94],   // rose-500
+          text: [190, 18, 60],     // rose-700
+          label: 'ALTA'
+        };
+      }
+      if (imp === 'BAJA') {
+        return {
+          fill: [241, 245, 249],   // slate-100
+          border: [203, 213, 225], // slate-300
+          text: [71, 85, 105],     // slate-600
+          label: 'BAJA'
+        };
+      }
+      // MEDIA
+      return {
+        fill: [254, 243, 199],     // amber-100
+        border: [245, 158, 11],    // amber-500
+        text: [146, 64, 14],       // amber-800
+        label: 'MEDIA'
+      };
+    };
+
+    // Helper to draw importance badge in PDF
+    const drawImportanceBadge = (importancia: string, x: number, y: number): number => {
+      const badge = getImportanceBadgeStyles(importancia);
+      doc.setFontSize(6.5);
+      doc.setFont("helvetica", "bold");
+      const textWidth = doc.getTextWidth(badge.label);
+      const badgeWidth = Math.max(textWidth + 4, 15);
+      const badgeHeight = 4.2;
+
+      doc.setFillColor(badge.fill[0], badge.fill[1], badge.fill[2]);
+      doc.setDrawColor(badge.border[0], badge.border[1], badge.border[2]);
+      doc.setLineWidth(0.2);
+      doc.roundedRect(x, y - 3.2, badgeWidth, badgeHeight, 1, 1, 'FD');
+
+      doc.setTextColor(badge.text[0], badge.text[1], badge.text[2]);
+      doc.text(badge.label, x + badgeWidth / 2, y - 0.2, { align: 'center' });
+      return badgeWidth;
     };
 
     // Prep data with completion dates
@@ -321,36 +456,62 @@ export default function App() {
         return new Date(b.latestEstimate).getTime() - new Date(a.latestEstimate).getTime();
       });
 
+      // Cada categoría comienza en una página nueva
       doc.addPage(); 
       currentY = 20;
-      doc.setFontSize(12);
-      doc.setTextColor(79, 70, 229); // indigo-600
-      doc.setFont(undefined, 'bold');
-      doc.text(`Categoría: ${cat}`, pageWidth / 2, currentY + 5, { align: 'center' });
-      doc.setFont(undefined, 'normal');
-      currentY += 10;
 
-      for (const ev of eventsInCat) {
-        if (currentY > 240) { doc.addPage(); currentY = 20; }
-        
-        // Event Title & Description
-        doc.setFontSize(10);
+      // Encabezado estilizado de Categoría
+      doc.setFillColor(238, 242, 255); // indigo-50
+      doc.setDrawColor(199, 210, 254); // indigo-200
+      doc.setLineWidth(0.3);
+      doc.roundedRect(14, currentY, 182, 10, 1.5, 1.5, 'FD');
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(67, 56, 202); // indigo-700
+      doc.text(`CATEGORÍA: ${cat.toUpperCase()}`, 18, currentY + 6.8);
+      currentY += 16;
+
+      for (let evIdx = 0; evIdx < eventsInCat.length; evIdx++) {
+        const ev = eventsInCat[evIdx];
+        ensureSpace(24);
+
+        // Título del Evento
+        doc.setFontSize(10.5);
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(15, 23, 42);
-        doc.text(ev.titulo.toUpperCase(), 14, currentY + 5);
-        currentY += 8;
+        doc.setTextColor(15, 23, 42); // slate-900
+        const splitEvTitle = doc.splitTextToSize(`EVENTO: ${ev.titulo.toUpperCase()}`, 180);
+        doc.text(splitEvTitle, 14, currentY);
+        currentY += (splitEvTitle.length * 4.8) + 1;
 
+        // Metadatos continuos del Evento con badge de estado
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text("Estado:", 14, currentY);
+        const evBadgeW = drawStatusBadge(ev.estado, 26, currentY);
+
+        const evMetaX = 26 + evBadgeW + 4;
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(71, 85, 105);
+        const estFin = ev.fecha_cierre ? format(new Date(ev.fecha_cierre), 'dd/MM/yyyy') : 'Sin definir';
+        const evMeta = `|  Supervisor: ${ev.supervisor || 'No asignado'}  |  Inicio: ${format(new Date(ev.fecha_inicio), 'dd/MM/yyyy')}  |  Fin: ${estFin}`;
+        doc.text(evMeta, evMetaX, currentY);
+        currentY += 5.5;
+
+        // Descripción del Evento
         if (ev.descripcion) {
           doc.setFontSize(8);
           doc.setFont("helvetica", "italic");
-          doc.setTextColor(100, 116, 139);
+          doc.setTextColor(71, 85, 105);
           const splitDesc = doc.splitTextToSize(ev.descripcion, 180);
+          ensureSpace(splitDesc.length * 4);
           doc.text(splitDesc, 14, currentY);
-          currentY += (splitDesc.length * 4) + 4;
+          currentY += (splitDesc.length * 4) + 3;
         }
-        doc.setTextColor(15, 23, 42);
 
-        // Define and sort follow-ups for this event
+        // Temas y sus Avances
         const evSegs = followUps
           .filter(s => s.id_eventos === ev.id)
           .sort((a, b) => {
@@ -360,72 +521,120 @@ export default function App() {
             return new Date(b.fecha_finalizacion).getTime() - new Date(a.fecha_finalizacion).getTime();
           });
 
-        // Event Main Info Table
-        const estFin = ev.fecha_cierre ? format(new Date(ev.fecha_cierre), 'dd/MM/yyyy') : 'Sin definir';
-        autoTable(doc, {
-          startY: currentY,
-          head: [['Estado', 'Categoría', 'Supervisor', 'Inicio', 'Fin Est.']],
-          body: [[
-            ev.estado,
-            ev.categoria,
-            ev.supervisor,
-            format(new Date(ev.fecha_inicio), 'dd/MM/yyyy'),
-            estFin
-          ]],
-          theme: 'grid',
-          headStyles: { fillColor: [79, 70, 229] },
-          styles: { fontSize: 8, cellPadding: 2 },
-          didParseCell: (data) => {
-            if (data.section === 'body' && data.column.index === 0) {
-              const colors = getStatusColors(data.cell.raw as string);
-              data.cell.styles.fillColor = colors.fill as any;
-              data.cell.styles.textColor = colors.text as any;
-              data.cell.styles.fontStyle = 'bold';
-            }
-          }
-        });
-
-        currentY = (doc as any).lastAutoTable.finalY + 1;
-
         if (evSegs.length > 0) {
-          // Prepare rows including potential images
-          const tableRows = await Promise.all(evSegs.map(async (s) => {
-            const row = [
-              format(new Date(s.fecha), 'dd/MM/yyyy'),
-              s.fecha_finalizacion ? format(new Date(s.fecha_finalizacion), 'dd/MM/yyyy') : 'S/E',
-              s.responsable,
-              s.descripcion_avance,
-              s.estado
-            ];
-            return row;
-          }));
-
-          autoTable(doc, {
-            startY: currentY,
-            head: [['Fecha Reporte', 'Fin Est.', 'Responsable', 'Detalle del Avance', 'Estado']],
-            body: tableRows,
-            theme: 'grid',
-            headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-            styles: { fontSize: 7, cellPadding: 2 },
-            columnStyles: { 3: { cellWidth: 80 } },
-            didParseCell: (data) => {
-              if (data.section === 'body' && data.column.index === 4) {
-                const colors = getStatusColors(data.cell.raw as string);
-                data.cell.styles.fillColor = colors.fill as any;
-                data.cell.styles.textColor = colors.text as any;
-                data.cell.styles.fontStyle = 'bold';
-              }
-            },
-            didDrawCell: (data) => {
-              // We'll handle image rendering separately after the table or in a specific way if needed
-              // But for jspdf-autotable, inserting images into cells is possible via didDrawCell
-            }
-          });
-          
-          currentY = (doc as any).lastAutoTable.finalY + 2;
-
-          // Add images below the table if they exist for these follow-ups
           for (const s of evSegs) {
+            ensureSpace(20);
+
+            // Barra de acento para el tema
+            doc.setFillColor(99, 102, 241); // indigo-500
+            doc.rect(14, currentY - 2.8, 2, 7.5, 'F');
+
+            // Subtítulo del Tema
+            doc.setFontSize(9.5);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(30, 41, 59); // slate-800
+            const temaTitle = `Tema: ${s.subtitulo || s.descripcion_avance || 'General'}`;
+            const splitTema = doc.splitTextToSize(temaTitle, 172);
+            doc.text(splitTema, 18, currentY);
+            currentY += (splitTema.length * 4.4) + 1;
+
+            // Datos del Tema: Responsable, Fecha, Fin Est. y Estado
+            doc.setFontSize(7.5);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(100, 116, 139);
+            doc.text("Responsable: ", 18, currentY);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(51, 65, 85);
+            const rText = s.responsable || 'No asignado';
+            doc.text(rText, 36, currentY);
+            const rWidth = doc.getTextWidth(rText);
+
+            const tMetaX = 36 + rWidth + 3;
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(100, 116, 139);
+            const tDates = `• Fecha: ${format(new Date(s.fecha), 'dd/MM/yyyy')}${s.fecha_finalizacion ? ` • Fin Est.: ${format(new Date(s.fecha_finalizacion), 'dd/MM/yyyy')}` : ''} • Estado: `;
+            doc.text(tDates, tMetaX, currentY);
+            const tDatesW = doc.getTextWidth(tDates);
+            drawStatusBadge(s.estado, tMetaX + tDatesW, currentY);
+            currentY += 5;
+
+            // Recursos u Observaciones si existen
+            if (s.recursos || s.observaciones) {
+              doc.setFontSize(7.5);
+              doc.setFont("helvetica", "italic");
+              doc.setTextColor(100, 116, 139);
+              if (s.recursos) {
+                const splitRec = doc.splitTextToSize(`Recursos: ${s.recursos}`, 172);
+                ensureSpace(splitRec.length * 3.8);
+                doc.text(splitRec, 18, currentY);
+                currentY += splitRec.length * 3.8;
+              }
+              if (s.observaciones) {
+                const splitObs = doc.splitTextToSize(`Observaciones: ${s.observaciones}`, 172);
+                ensureSpace(splitObs.length * 3.8);
+                doc.text(splitObs, 18, currentY);
+                currentY += splitObs.length * 3.8;
+              }
+              currentY += 1;
+            }
+
+            // Listado de Avances del Tema
+            const temaAvances = avances
+              .filter(a => a.id_temas === s.id)
+              .sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+
+            if (temaAvances.length > 0) {
+              ensureSpace(8);
+              doc.setFontSize(8);
+              doc.setFont("helvetica", "bold");
+              doc.setTextColor(71, 85, 105);
+              doc.text("Avances registrados:", 18, currentY);
+              currentY += 4.5;
+
+              for (const a of temaAvances) {
+                const splitAvDesc = doc.splitTextToSize(a.descripcion, 150);
+                const blockH = 4.2 + (splitAvDesc.length * 3.8) + 2;
+                ensureSpace(blockH);
+
+                // Viñeta
+                doc.setFontSize(8);
+                doc.setFont("helvetica", "bold");
+                doc.setTextColor(148, 163, 184);
+                doc.text("•", 20, currentY);
+
+                // Badge de Importancia coloreado según su nivel
+                const impW = drawImportanceBadge(a.importancia || 'MEDIA', 23, currentY);
+
+                // Fecha y Responsable del avance
+                doc.setFontSize(7.5);
+                doc.setFont("helvetica", "bold");
+                doc.setTextColor(71, 85, 105);
+                const aDate = format(new Date(a.fecha), 'dd/MM/yyyy');
+                doc.text(aDate, 23 + impW + 2.5, currentY);
+
+                if (a.responsable) {
+                  doc.setFont("helvetica", "normal");
+                  doc.setTextColor(100, 116, 139);
+                  doc.text(`(${a.responsable})`, 23 + impW + 2.5 + doc.getTextWidth(aDate) + 2, currentY);
+                }
+                currentY += 3.8;
+
+                // Texto del avance indentado
+                doc.setFontSize(8);
+                doc.setFont("helvetica", "normal");
+                doc.setTextColor(30, 41, 59); // slate-800
+                doc.text(splitAvDesc, 26, currentY);
+                currentY += (splitAvDesc.length * 3.8) + 2.2;
+              }
+            } else {
+              doc.setFontSize(7.5);
+              doc.setFont("helvetica", "italic");
+              doc.setTextColor(148, 163, 184);
+              doc.text("• Sin avances puntuales registrados para este tema.", 20, currentY);
+              currentY += 4;
+            }
+
+            // Evidencia fotográfica asociada al tema
             if (s.image_url) {
               try {
                 const imgData = await new Promise<string>((resolve, reject) => {
@@ -442,40 +651,52 @@ export default function App() {
                   img.onerror = reject;
                   img.src = s.image_url!;
                 });
-                // Add image with proportional scaling
+
                 const imgProps = (doc as any).getImageProperties(imgData);
-                const maxWidth = 180;
-                // Reducimos al 80% del valor anterior
+                const maxWidth = 160;
+                // Reducido al 80% del tamaño previo
                 const imgWidth = Math.min(maxWidth, (imgProps.width / 4) * 3) * 0.8;
                 const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
 
-                // Verificamos si cabe en la página actual
-                if (currentY + imgHeight + 10 > 280) { 
-                  doc.addPage(); 
-                  currentY = 20; 
+                // Si excede el tamaño disponible en la página, se pasa a la siguiente
+                if (currentY + imgHeight + 12 > 275) {
+                  doc.addPage();
+                  currentY = 20;
                 }
 
-                doc.setFontSize(6);
-                doc.setTextColor(150);
-                doc.text(`Evidencia - ${format(new Date(s.fecha), 'dd/MM/yyyy')}:`, 14, currentY);
-                currentY += 2;
+                doc.setFontSize(7);
+                doc.setFont("helvetica", "italic");
+                doc.setTextColor(100, 116, 139);
+                doc.text(`Evidencia fotográfica - ${s.subtitulo || 'Tema'} (${format(new Date(s.fecha), 'dd/MM/yyyy')}):`, 18, currentY);
+                currentY += 3;
 
-                doc.addImage(imgData, 'JPEG', 14, currentY, imgWidth, imgHeight);
-                currentY += imgHeight + 6;
+                doc.addImage(imgData, 'JPEG', 18, currentY, imgWidth, imgHeight);
+                currentY += imgHeight + 5;
               } catch (e) {
-                console.error("Error adding image to PDF", e);
+                console.error("Error al renderizar imagen de tema en PDF", e);
               }
             }
+
+            currentY += 3;
           }
-          currentY += 4;
         } else {
-          doc.setFontSize(7);
-          doc.setTextColor(150);
-          doc.text("Sin registros de seguimiento.", 18, currentY + 4);
-          currentY += 10;
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "italic");
+          doc.setTextColor(148, 163, 184);
+          doc.text("Sin temas registrados para este evento.", 18, currentY);
+          currentY += 5;
+        }
+
+        // Línea divisoria tenue entre eventos de la misma categoría
+        if (evIdx < eventsInCat.length - 1) {
+          ensureSpace(6);
+          doc.setDrawColor(226, 232, 240); // slate-200
+          doc.setLineWidth(0.3);
+          doc.line(14, currentY, 196, currentY);
+          currentY += 6;
         }
       }
-      currentY += 5;
+      currentY += 4;
     }
     
     const pageCount = (doc as any).internal.getNumberOfPages();
@@ -550,8 +771,13 @@ export default function App() {
     if (!window.confirm("¿Estás seguro de que deseas eliminar este registro permanentemente? Esta acción no se puede deshacer y eliminará también toda su bitácora.")) return;
     
     try {
-      // Delete associated follow-ups first due to potential foreign key constraints
-      await supabase.from('seguimiento').delete().eq('id_eventos', id);
+      // Delete associated avances first, then temas due to foreign key constraints
+      const { data: evTemas } = await supabase.from('temas').select('id').eq('id_eventos', id);
+      if (evTemas && evTemas.length > 0) {
+        const tIds = evTemas.map(t => t.id);
+        await supabase.from('avances').delete().in('id_temas', tIds);
+      }
+      await supabase.from('temas').delete().eq('id_eventos', id);
       const { error } = await supabase.from('eventos').delete().eq('id', id);
       
       if (error) throw error;
@@ -687,6 +913,7 @@ export default function App() {
                 categories={categories} 
                 states={states}
                 fetchInitialData={fetchInitialData}
+                currentUser={user}
               />
             ) : view === 'config' ? (
               <ConfigView 
@@ -793,7 +1020,7 @@ export default function App() {
                                <td className="px-6 py-4 font-medium text-slate-900 max-w-xs truncate">
                                  <div className="flex items-center gap-2">
                                    {hasUrgentFollowUp(ev.id) && (
-                                     <div className="flex items-center gap-1.5" title="Este registro tiene seguimientos con menos de 3 días para su finalización estimada">
+                                     <div className="flex items-center gap-1.5" title="Este registro tiene temas con menos de 3 días para su finalización estimada">
                                        <div className="flex h-2 w-2 relative">
                                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                                           <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
@@ -1145,28 +1372,123 @@ function EventModal({ onClose, categories, states, userId, onSuccess }: any) {
   );
 }
 
-function EventDetail({ id, onBack, categories, states, fetchInitialData }: any) {
+function EventDetail({ id, onBack, categories, states, fetchInitialData, currentUser }: any) {
   const [event, setEvent] = useState<Evento | null>(null);
-  const [followUps, setFollowUps] = useState<Seguimiento[]>([]);
+  const [followUps, setFollowUps] = useState<Tema[]>([]);
+  const [avances, setAvances] = useState<Avance[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingFollowUp, setIsAddingFollowUp] = useState(false);
-  const [editingFollowUp, setEditingFollowUp] = useState<Seguimiento | null>(null);
+  const [editingFollowUp, setEditingFollowUp] = useState<Tema | null>(null);
+  const [addingAvanceTemaId, setAddingAvanceTemaId] = useState<string | null>(null);
+  const [quickAvanceDesc, setQuickAvanceDesc] = useState('');
+  const [quickAvanceResp, setQuickAvanceResp] = useState('');
+  const [quickAvanceImp, setQuickAvanceImp] = useState('MEDIA');
+  const [savingQuickAvance, setSavingQuickAvance] = useState(false);
+
+  // State for inline editing of an existing advance in EventDetail
+  const [editingAvance, setEditingAvance] = useState<Avance | null>(null);
+  const [editAvanceFecha, setEditAvanceFecha] = useState('');
+  const [editAvanceResp, setEditAvanceResp] = useState('');
+  const [editAvanceImp, setEditAvanceImp] = useState('MEDIA');
+  const [editAvanceDesc, setEditAvanceDesc] = useState('');
+  const [savingEditAvance, setSavingEditAvance] = useState(false);
+
+  const startEditingAvance = (av: Avance) => {
+    setEditingAvance(av);
+    setEditAvanceFecha(av.fecha);
+    setEditAvanceResp(av.responsable || '');
+    setEditAvanceImp(av.importancia || 'MEDIA');
+    setEditAvanceDesc(av.descripcion);
+  };
+
+  const handleSaveEditAvance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAvance || !editAvanceDesc.trim()) return;
+    setSavingEditAvance(true);
+    try {
+      const { error } = await supabase.from('avances').update({
+        fecha: editAvanceFecha,
+        responsable: editAvanceResp.trim() || null,
+        importancia: editAvanceImp,
+        descripcion: editAvanceDesc.trim()
+      }).eq('id', editingAvance.id);
+      if (error) throw error;
+      setEditingAvance(null);
+      await fetchDetail();
+      await fetchInitialData();
+    } catch (err: any) {
+      alert("Error al actualizar avance: " + err.message);
+    } finally {
+      setSavingEditAvance(false);
+    }
+  };
 
   const fetchDetail = async () => {
     setLoading(true);
     const { data: ev } = await supabase.from('eventos').select('*').eq('id', id).single();
-    const { data: segs } = await supabase.from('seguimiento').select('*').eq('id_eventos', id).order('fecha', { ascending: false });
+    const { data: temasData } = await supabase.from('temas').select('*').eq('id_eventos', id).order('fecha', { ascending: false });
     if (ev) setEvent(ev);
-    setFollowUps(segs || []);
+    const loadedTemas = (temasData || []).map(t => ({
+      ...t,
+      descripcion_avance: t.subtitulo
+    }));
+    setFollowUps(loadedTemas);
+
+    if (loadedTemas.length > 0) {
+      const temaIds = loadedTemas.map(t => t.id);
+      const { data: avs } = await supabase
+        .from('avances')
+        .select('*')
+        .in('id_temas', temaIds)
+        .order('fecha', { ascending: false });
+      setAvances(avs || []);
+    } else {
+      setAvances([]);
+    }
     setLoading(false);
   };
 
   useEffect(() => { fetchDetail(); }, [id]);
 
   const removeFollowUp = async (sid: string) => {
-    if (!confirm("Confirmas la eliminación definitiva de este registro?")) return;
-    await supabase.from('seguimiento').delete().eq('id', sid);
+    if (!confirm("¿Confirmas la eliminación definitiva de este tema y todos sus avances?")) return;
+    await supabase.from('avances').delete().eq('id_temas', sid);
+    await supabase.from('temas').delete().eq('id', sid);
     fetchDetail();
+    fetchInitialData();
+  };
+
+  const removeAvance = async (avanceId: string) => {
+    if (!confirm("¿Confirmas la eliminación de este avance?")) return;
+    await supabase.from('avances').delete().eq('id', avanceId);
+    fetchDetail();
+    fetchInitialData();
+  };
+
+  const handleQuickAddAvance = async (e: React.FormEvent, temaId: string) => {
+    e.preventDefault();
+    if (!quickAvanceDesc.trim()) return;
+    setSavingQuickAvance(true);
+    try {
+      const payload = {
+        id: crypto.randomUUID(),
+        id_temas: temaId,
+        fecha: format(new Date(), 'yyyy-MM-dd'),
+        responsable: quickAvanceResp.trim() || currentUser?.nombre || null,
+        importancia: quickAvanceImp || 'MEDIA',
+        descripcion: quickAvanceDesc.trim()
+      };
+      const { error } = await supabase.from('avances').insert(payload);
+      if (error) throw error;
+      setQuickAvanceDesc('');
+      setAddingAvanceTemaId(null);
+      await fetchDetail();
+      await fetchInitialData();
+    } catch (err: any) {
+      alert("Error al registrar avance: " + err.message);
+    } finally {
+      setSavingQuickAvance(false);
+    }
   };
 
   const handleUpdate = async (e: any) => {
@@ -1236,103 +1558,311 @@ function EventDetail({ id, onBack, categories, states, fetchInitialData }: any) 
 
         <section className="lg:col-span-8 flex flex-col gap-6 md:gap-8 order-1 lg:order-2">
           <div className="flex items-center justify-between px-2 gap-4">
-            <h3 className="text-xl md:text-2xl font-black text-slate-900 leading-tight">Bitácora de Seguimiento</h3>
+            <h3 className="text-xl md:text-2xl font-black text-slate-900 leading-tight">Bitácora de Temas</h3>
             <Button onClick={() => setIsAddingFollowUp(true)} className="shrink-0 text-xs md:text-sm px-3 md:px-4">
-              <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Nuevo Avance</span><span className="sm:hidden">Nuevo</span>
+              <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Nuevo Tema</span><span className="sm:hidden">Nuevo</span>
             </Button>
           </div>
 
           <div className="space-y-6">
-            {followUps.map((s, idx) => (
-              <motion.div 
-                key={s.id} 
-                initial={{ opacity: 0, x: -20 }} 
-                animate={{ opacity: 1, x: 0, transition: { delay: idx * 0.1 } }}
-                className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm relative group hover:shadow-md transition-all"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 font-bold text-sm">
-                      {format(new Date(s.fecha), 'dd')}
+            {followUps.map((s, idx) => {
+              const temaAvances = avances.filter(a => a.id_temas === s.id);
+              return (
+                <motion.div 
+                  key={s.id} 
+                  initial={{ opacity: 0, x: -20 }} 
+                  animate={{ opacity: 1, x: 0, transition: { delay: idx * 0.1 } }}
+                  className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm relative group hover:shadow-md transition-all"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 font-bold text-sm">
+                        {format(new Date(s.fecha), 'dd')}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-slate-900 leading-none mb-1">{s.responsable}</h4>
+                          {isUrgentReport(s) && (
+                            <div className="flex h-2 w-2 relative" title="Restan 3 días o menos para la fecha de finalización estimada">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{format(new Date(s.fecha), 'MMMM yyyy', { locale: es })}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 text-[9px] font-bold uppercase rounded tracking-widest mr-1 ${
+                        s.estado === 'FINALIZADO' ? 'bg-emerald-100 text-emerald-800' : 
+                        s.estado === 'EN PROCESO' ? 'bg-amber-100 text-amber-800' : 
+                        s.estado === 'ABANDONADO' ? 'bg-rose-100 text-rose-800' : 
+                        'bg-indigo-100 text-indigo-800'
+                      }`}>
+                        {s.estado}
+                      </span>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => setEditingFollowUp(s)} 
+                          className="w-7 h-7 rounded-md bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-slate-200 hover:text-slate-900 transition-colors cursor-pointer"
+                          title="Editar Tema"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button 
+                          onClick={() => removeFollowUp(s.id)} 
+                          className="w-7 h-7 rounded-md bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
+                          title="Eliminar Tema"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Subtítulo del Tema */}
+                  <div className="mb-4">
+                    <span className="text-[9px] font-bold text-indigo-600 uppercase tracking-widest block mb-0.5">Tema / Subtítulo</span>
+                    <h4 className="text-base font-bold text-slate-900 leading-snug">
+                      {s.subtitulo || s.descripcion_avance}
+                    </h4>
+                  </div>
+
+                  {/* Sección de Avances */}
+                  <div className="my-4 bg-slate-50/90 rounded-xl p-4 border border-slate-100">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Avances Registrados</span>
+                        <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          {temaAvances.length}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (addingAvanceTemaId === s.id) {
+                            setAddingAvanceTemaId(null);
+                          } else {
+                            setAddingAvanceTemaId(s.id);
+                            setQuickAvanceResp(currentUser?.nombre || s.responsable || '');
+                            setQuickAvanceDesc('');
+                          }
+                        }}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Agregar Avance
+                      </button>
+                    </div>
+
+                    {addingAvanceTemaId === s.id && (
+                      <form onSubmit={(e) => handleQuickAddAvance(e, s.id)} className="bg-white p-3.5 rounded-xl border border-indigo-200 shadow-sm mb-3 flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">Nuevo Avance</span>
+                          <button type="button" onClick={() => setAddingAvanceTemaId(null)} className="text-slate-400 hover:text-slate-600">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input 
+                            type="text"
+                            placeholder="Responsable del avance..."
+                            value={quickAvanceResp}
+                            onChange={(e) => setQuickAvanceResp(e.target.value)}
+                            className="bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                          <select
+                            value={quickAvanceImp}
+                            onChange={(e) => setQuickAvanceImp(e.target.value)}
+                            className="bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-bold text-slate-700"
+                          >
+                            <option value="BAJA">Importancia: BAJA</option>
+                            <option value="MEDIA">Importancia: MEDIA</option>
+                            <option value="ALTA">Importancia: ALTA</option>
+                            <option value="URGENTE">Importancia: URGENTE</option>
+                          </select>
+                        </div>
+                        <textarea
+                          rows={2}
+                          required
+                          placeholder="Descripción del avance..."
+                          value={quickAvanceDesc}
+                          onChange={(e) => setQuickAvanceDesc(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-md p-2 text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setAddingAvanceTemaId(null)}
+                            className="px-3 py-1 text-xs text-slate-500 hover:bg-slate-100 rounded"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={savingQuickAvance || !quickAvanceDesc.trim()}
+                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded flex items-center gap-1 shadow-xs"
+                          >
+                            <Save className="w-3 h-3" /> {savingQuickAvance ? 'Guardando...' : 'Guardar Avance'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {temaAvances.length > 0 ? (
+                      <div className="space-y-2">
+                        {temaAvances.map(av => (
+                          <div key={av.id} className="bg-white p-3 rounded-lg border border-slate-200 shadow-xs">
+                            {editingAvance?.id === av.id ? (
+                              <form onSubmit={handleSaveEditAvance} className="flex flex-col gap-2.5">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                                  <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider">
+                                    ✏️ Editando Avance
+                                  </span>
+                                  <button type="button" onClick={() => setEditingAvance(null)} className="text-slate-400 hover:text-slate-600">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-400 uppercase">Fecha</label>
+                                    <input 
+                                      type="date"
+                                      value={editAvanceFecha}
+                                      onChange={(e) => setEditAvanceFecha(e.target.value)}
+                                      className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                                      required
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-400 uppercase">Responsable</label>
+                                    <input 
+                                      type="text"
+                                      placeholder="Responsable..."
+                                      value={editAvanceResp}
+                                      onChange={(e) => setEditAvanceResp(e.target.value)}
+                                      className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] font-bold text-slate-400 uppercase">Importancia</label>
+                                    <select 
+                                      value={editAvanceImp}
+                                      onChange={(e) => setEditAvanceImp(e.target.value)}
+                                      className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-bold text-slate-700"
+                                    >
+                                      <option value="BAJA">BAJA</option>
+                                      <option value="MEDIA">MEDIA</option>
+                                      <option value="ALTA">ALTA</option>
+                                      <option value="URGENTE">URGENTE</option>
+                                    </select>
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-bold text-slate-400 uppercase">Detalle del Avance</label>
+                                  <textarea
+                                    rows={2}
+                                    required
+                                    value={editAvanceDesc}
+                                    onChange={(e) => setEditAvanceDesc(e.target.value)}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-md p-2 text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800"
+                                  />
+                                </div>
+                                <div className="flex justify-end gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingAvance(null)}
+                                    className="px-3 py-1 text-xs text-slate-500 hover:bg-slate-100 rounded font-medium"
+                                  >
+                                    Cancelar
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    disabled={savingEditAvance || !editAvanceDesc.trim()}
+                                    className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded flex items-center gap-1 shadow-xs"
+                                  >
+                                    <Save className="w-3 h-3" /> {savingEditAvance ? 'Guardando...' : 'Guardar Cambios'}
+                                  </button>
+                                </div>
+                              </form>
+                            ) : (
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
+                                      {format(new Date(av.fecha), 'dd/MM/yyyy')}
+                                    </span>
+                                    {av.responsable && (
+                                      <span className="text-[11px] font-bold text-slate-800 truncate">
+                                        {av.responsable}
+                                      </span>
+                                    )}
+                                    <ImportanciaBadge importancia={av.importancia} />
+                                  </div>
+                                  <p className="text-xs text-slate-700 whitespace-pre-line leading-relaxed">
+                                    {av.descripcion}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => startEditingAvance(av)}
+                                    className="text-slate-400 hover:text-indigo-600 transition-colors p-1 cursor-pointer"
+                                    title="Editar avance"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeAvance(av.id)}
+                                    className="text-slate-400 hover:text-rose-600 transition-colors p-1 cursor-pointer"
+                                    title="Eliminar avance"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-slate-400 italic">No hay avances registrados para este tema.</p>
+                    )}
+                  </div>
+
+                  {s.image_url && (
+                    <div className="mb-4 rounded-lg overflow-hidden border border-slate-100 max-w-sm">
+                      <img 
+                        src={s.image_url} 
+                        alt="Evidencia" 
+                        className="w-full h-auto object-cover hover:scale-105 transition-transform duration-500 cursor-pointer"
+                        onClick={() => window.open(s.image_url!, '_blank')}
+                      />
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 border-t border-slate-50">
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Recursos</span>
+                      <span className="text-xs font-bold text-slate-700 truncate block">{s.recursos || 'S/E'}</span>
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-slate-900 leading-none mb-1">{s.responsable}</h4>
-                        {isUrgentReport(s) && (
-                          <div className="flex h-2 w-2 relative" title="Restan 3 días o menos para la fecha de finalización estimada">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)]"></span>
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{format(new Date(s.fecha), 'MMMM yyyy', { locale: es })}</p>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Finalización</span>
+                      <span className="text-xs font-bold text-slate-700 truncate block">
+                        {s.fecha_finalizacion ? format(new Date(s.fecha_finalizacion), 'dd/MM/yyyy') : 'Pendiente'}
+                      </span>
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-1 border-t sm:border-t-0 sm:pt-0 pt-3 mt-3 sm:mt-0">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Observación</span>
+                      <span className="text-xs font-bold text-slate-700 block italic leading-snug">{s.observaciones || '---'}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-1 text-[9px] font-bold uppercase rounded tracking-widest mr-1 ${
-                      s.estado === 'FINALIZADO' ? 'bg-emerald-100 text-emerald-800' : 
-                      s.estado === 'EN PROCESO' ? 'bg-amber-100 text-amber-800' : 
-                      s.estado === 'ABANDONADO' ? 'bg-rose-100 text-rose-800' : 
-                      'bg-indigo-100 text-indigo-800'
-                    }`}>
-                      {s.estado}
-                    </span>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={() => setEditingFollowUp(s)} 
-                        className="w-7 h-7 rounded-md bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-slate-200 hover:text-slate-900 transition-colors cursor-pointer"
-                        title="Editar"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      <button 
-                        onClick={() => removeFollowUp(s.id)} 
-                        className="w-7 h-7 rounded-md bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
-                        title="Eliminar"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                
-                <p className="text-slate-600 text-sm font-medium leading-relaxed mb-4">
-                  {s.descripcion_avance}
-                </p>
-
-                {s.image_url && (
-                  <div className="mb-4 rounded-lg overflow-hidden border border-slate-100 max-w-sm">
-                    <img 
-                      src={s.image_url} 
-                      alt="Evidencia" 
-                      className="w-full h-auto object-cover hover:scale-105 transition-transform duration-500 cursor-pointer"
-                      onClick={() => window.open(s.image_url!, '_blank')}
-                    />
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 border-t border-slate-50">
-                  <div>
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Recursos</span>
-                    <span className="text-xs font-bold text-slate-700 truncate block">{s.recursos || 'S/E'}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Finalización</span>
-                    <span className="text-xs font-bold text-slate-700 truncate block">
-                      {s.fecha_finalizacion ? format(new Date(s.fecha_finalizacion), 'dd/MM/yyyy') : 'Pendiente'}
-                    </span>
-                  </div>
-                  <div className="sm:col-span-2 lg:col-span-1 border-t sm:border-t-0 sm:pt-0 pt-3 mt-3 sm:mt-0">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Observación</span>
-                    <span className="text-xs font-bold text-slate-700 block italic leading-snug">{s.observaciones || '---'}</span>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
             {followUps.length === 0 && (
               <div className="py-24 bg-white rounded-[2rem] border border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-300">
                 <CheckCircle2 className="w-12 h-12 mb-4 opacity-10" />
-                <p className="font-bold uppercase tracking-widest text-[10px]">Sin reportes registrados</p>
+                <p className="font-bold uppercase tracking-widest text-[10px]">Sin temas registrados</p>
               </div>
             )}
           </div>
@@ -1345,6 +1875,7 @@ function EventDetail({ id, onBack, categories, states, fetchInitialData }: any) 
             eventId={id} 
             states={states} 
             followUp={editingFollowUp}
+            currentUser={currentUser}
             onClose={() => { setIsAddingFollowUp(false); setEditingFollowUp(null); }} 
             onSuccess={() => { setIsAddingFollowUp(false); setEditingFollowUp(null); fetchDetail(); fetchInitialData(); }} 
           />
@@ -1354,10 +1885,133 @@ function EventDetail({ id, onBack, categories, states, fetchInitialData }: any) 
   );
 }
 
-function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
+function FollowUpModal({ eventId, states, onClose, onSuccess, followUp, currentUser }: any) {
   const [loading, setLoading] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(followUp?.image_url || null);
+
+  // Avances state inside modal
+  const [existingAvances, setExistingAvances] = useState<Avance[]>([]);
+  const [pendingAvances, setPendingAvances] = useState<Array<{ id: string; fecha: string; responsable: string; descripcion: string; importancia: string }>>([]);
+  
+  // Inputs for adding or editing an avance inside the modal
+  const [editingAvanceId, setEditingAvanceId] = useState<string | null>(null);
+  const [newAvanceFecha, setNewAvanceFecha] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [newAvanceResp, setNewAvanceResp] = useState(currentUser?.nombre || followUp?.responsable || '');
+  const [newAvanceImp, setNewAvanceImp] = useState('MEDIA');
+  const [newAvanceDesc, setNewAvanceDesc] = useState('');
+  const [savingAvanceInModal, setSavingAvanceInModal] = useState(false);
+
+  useEffect(() => {
+    if (followUp?.id) {
+      supabase
+        .from('avances')
+        .select('*')
+        .eq('id_temas', followUp.id)
+        .order('fecha', { ascending: false })
+        .then(({ data }) => setExistingAvances(data || []));
+    }
+  }, [followUp?.id]);
+
+  const handleStartEditAvanceInModal = (av: any) => {
+    setEditingAvanceId(av.id);
+    setNewAvanceFecha(av.fecha || format(new Date(), 'yyyy-MM-dd'));
+    setNewAvanceResp(av.responsable || '');
+    setNewAvanceImp(av.importancia || 'MEDIA');
+    setNewAvanceDesc(av.descripcion || '');
+  };
+
+  const handleCancelEditAvanceInModal = () => {
+    setEditingAvanceId(null);
+    setNewAvanceFecha(format(new Date(), 'yyyy-MM-dd'));
+    setNewAvanceResp(currentUser?.nombre || followUp?.responsable || '');
+    setNewAvanceImp('MEDIA');
+    setNewAvanceDesc('');
+  };
+
+  const handleSaveAvanceInModal = async () => {
+    if (!newAvanceDesc.trim()) return;
+
+    if (editingAvanceId) {
+      // Editar avance existente
+      if (followUp?.id) {
+        setSavingAvanceInModal(true);
+        const updatePayload = {
+          fecha: newAvanceFecha,
+          responsable: newAvanceResp.trim() || null,
+          importancia: newAvanceImp,
+          descripcion: newAvanceDesc.trim()
+        };
+        const { data, error } = await supabase
+          .from('avances')
+          .update(updatePayload)
+          .eq('id', editingAvanceId)
+          .select()
+          .single();
+        if (error) {
+          alert("Error al actualizar avance: " + error.message);
+        } else if (data) {
+          setExistingAvances(prev => prev.map(a => a.id === editingAvanceId ? data : a));
+          handleCancelEditAvanceInModal();
+        }
+        setSavingAvanceInModal(false);
+      } else {
+        setPendingAvances(prev => prev.map(a => a.id === editingAvanceId ? {
+          ...a,
+          fecha: newAvanceFecha,
+          responsable: newAvanceResp.trim() || currentUser?.nombre || '',
+          importancia: newAvanceImp,
+          descripcion: newAvanceDesc.trim()
+        } : a));
+        handleCancelEditAvanceInModal();
+      }
+      return;
+    }
+    
+    // Crear nuevo avance
+    if (followUp?.id) {
+      setSavingAvanceInModal(true);
+      const newAv = {
+        id: crypto.randomUUID(),
+        id_temas: followUp.id,
+        fecha: newAvanceFecha,
+        responsable: newAvanceResp.trim() || currentUser?.nombre || null,
+        importancia: newAvanceImp,
+        descripcion: newAvanceDesc.trim()
+      };
+      const { data, error } = await supabase.from('avances').insert(newAv).select().single();
+      if (error) {
+        alert("Error al agregar avance: " + error.message);
+      } else if (data) {
+        setExistingAvances(prev => [data, ...prev]);
+        setNewAvanceDesc('');
+      }
+      setSavingAvanceInModal(false);
+    } else {
+      const stagedAv = {
+        id: crypto.randomUUID(),
+        fecha: newAvanceFecha,
+        responsable: newAvanceResp.trim() || currentUser?.nombre || '',
+        importancia: newAvanceImp,
+        descripcion: newAvanceDesc.trim()
+      };
+      setPendingAvances(prev => [stagedAv, ...prev]);
+      setNewAvanceDesc('');
+    }
+  };
+
+  const handleDeleteAvanceInModal = async (avanceId: string) => {
+    if (editingAvanceId === avanceId) {
+      handleCancelEditAvanceInModal();
+    }
+    if (followUp?.id) {
+      if (!confirm("¿Deseas eliminar este avance?")) return;
+      await supabase.from('avances').delete().eq('id', avanceId);
+      setExistingAvances(prev => prev.filter(a => a.id !== avanceId));
+    } else {
+      setPendingAvances(prev => prev.filter(a => a.id !== avanceId));
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1482,7 +2136,7 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
       id_eventos: eventId,
       responsable: fd.get('responsable'),
       fecha: fd.get('fecha'),
-      descripcion_avance: fd.get('descripcion'),
+      subtitulo: fd.get('subtitulo'),
       fecha_finalizacion: fd.get('fecha_finalizacion') || null,
       recursos: fd.get('recursos'),
       estado: fd.get('estado'),
@@ -1492,11 +2146,23 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
     
     let error;
     if (followUp) {
-      const { error: err } = await supabase.from('seguimiento').update(payload).eq('id', followUp.id);
+      const { error: err } = await supabase.from('temas').update(payload).eq('id', followUp.id);
       error = err;
     } else {
-      const { error: err } = await supabase.from('seguimiento').insert({ ...payload, id: crypto.randomUUID() });
+      const newTemaId = crypto.randomUUID();
+      const { error: err } = await supabase.from('temas').insert({ ...payload, id: newTemaId });
       error = err;
+      if (!err && pendingAvances.length > 0) {
+        const toInsert = pendingAvances.map(a => ({
+          id: a.id,
+          id_temas: newTemaId,
+          fecha: a.fecha,
+          responsable: a.responsable || null,
+          importancia: a.importancia,
+          descripcion: a.descripcion
+        }));
+        await supabase.from('avances').insert(toInsert);
+      }
     }
     
     if (error) alert(error.message); else onSuccess();
@@ -1505,10 +2171,10 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
 
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden overflow-y-auto max-h-[95vh]">
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden overflow-y-auto max-h-[95vh]">
         <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
           <h3 className="font-bold text-xl tracking-tight text-slate-900">
-            {followUp ? 'Editar Avance' : 'Nuevo Avance'}
+            {followUp ? 'Editar Tema' : 'Nuevo Tema'}
           </h3>
           <button onClick={onClose} className="w-8 h-8 hover:bg-white rounded-lg flex items-center justify-center text-slate-400 transition-colors cursor-pointer"><X /></button>
         </div>
@@ -1517,12 +2183,176 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
             <Input name="fecha" label="Fecha Reporte" type="date" required defaultValue={followUp?.fecha || format(new Date(), 'yyyy-MM-dd')} />
             <Input name="fecha_finalizacion" label="Fin Est." type="date" defaultValue={followUp?.fecha_finalizacion || ''} />
           </div>
-          <Input name="responsable" label="Responsable del Avance" placeholder="Nombre completo" required icon={User} defaultValue={followUp?.responsable || ''} />
-          <Select name="estado" label="Estado Actual" options={states} required defaultValue={followUp?.estado || ''} />
+          <Input name="responsable" label="Responsable del Tema" placeholder="Nombre completo" required icon={User} defaultValue={followUp?.responsable || currentUser?.nombre || ''} />
+          <Select name="estado" label="Estado Actual" options={states} required defaultValue={followUp?.estado || 'EN PROCESO'} />
           
+          {/* Subtítulo del Tema */}
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">Resumen de Actividades</label>
-            <textarea name="descripcion" rows={4} className="w-full bg-slate-50 border border-slate-200 rounded-md p-3 text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800" required placeholder="Describe qué se avanzó en este periodo..." defaultValue={followUp?.descripcion_avance || ''} />
+            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">
+              Subtítulo del Tema
+            </label>
+            <input 
+              name="subtitulo" 
+              required 
+              placeholder="Ej: Padrón de Equipos, Montaje de planta..." 
+              defaultValue={followUp?.subtitulo || followUp?.descripcion_avance || ''} 
+              className="w-full bg-slate-50 border border-slate-200 rounded-md p-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800"
+            />
+          </div>
+
+          {/* En lugar del cuadro 'Resumen de Actividades': Registro de Avances según tabla 'avances' */}
+          <div className="flex flex-col gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-widest leading-none">
+                  Avances del Tema
+                </label>
+                <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                  {(followUp ? existingAvances : pendingAvances).length}
+                </span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium">Tabla: avances</span>
+            </div>
+
+            {/* Listado de avances */}
+            {((followUp ? existingAvances : pendingAvances).length > 0) ? (
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {(followUp ? existingAvances : pendingAvances).map((av: any) => (
+                  <div key={av.id} className={`p-2.5 rounded-lg border flex items-start justify-between gap-2 shadow-xs transition-colors ${
+                    editingAvanceId === av.id ? 'bg-amber-50/60 border-amber-300' : 'bg-white border-slate-200'
+                  }`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                          {format(new Date(av.fecha), 'dd/MM/yyyy')}
+                        </span>
+                        {av.responsable && (
+                          <span className="text-[10px] font-bold text-slate-700 truncate">
+                            {av.responsable}
+                          </span>
+                        )}
+                        <ImportanciaBadge importancia={av.importancia} />
+                      </div>
+                      <p className="text-xs text-slate-800 whitespace-pre-line leading-relaxed">
+                        {av.descripcion}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleStartEditAvanceInModal(av)}
+                        className={`p-1 cursor-pointer transition-colors ${
+                          editingAvanceId === av.id ? 'text-amber-600' : 'text-slate-400 hover:text-indigo-600'
+                        }`}
+                        title="Editar avance"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAvanceInModal(av.id)}
+                        className="text-slate-300 hover:text-rose-600 p-1 cursor-pointer transition-colors"
+                        title="Eliminar avance"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 italic py-2 text-center bg-white rounded-lg border border-dashed border-slate-200">
+                Sin avances registrados aún. Puedes ingresar avances a continuación:
+              </p>
+            )}
+
+            {/* Formulario para ingresar / editar avance */}
+            <div className={`p-3 rounded-lg border flex flex-col gap-2.5 transition-colors ${
+              editingAvanceId ? 'bg-amber-50/40 border-amber-300' : 'bg-white border-slate-200'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                  {editingAvanceId ? '✏️ Editar Avance' : '+ Ingresar Avance'}
+                </span>
+                {editingAvanceId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditAvanceInModal}
+                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                  >
+                    Cancelar edición
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[9px] font-bold text-slate-400 uppercase">Fecha</label>
+                  <input 
+                    type="date"
+                    value={newAvanceFecha}
+                    onChange={(e) => setNewAvanceFecha(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-bold text-slate-400 uppercase">Responsable</label>
+                  <input 
+                    type="text"
+                    placeholder="Responsable..."
+                    value={newAvanceResp}
+                    onChange={(e) => setNewAvanceResp(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-bold text-slate-400 uppercase">Importancia</label>
+                  <select 
+                    value={newAvanceImp}
+                    onChange={(e) => setNewAvanceImp(e.target.value)}
+                    className={`w-full bg-slate-50 border rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-bold ${
+                      newAvanceImp === 'URGENTE' ? 'border-red-400 text-red-600' : 'border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <option value="BAJA">BAJA</option>
+                    <option value="MEDIA">MEDIA</option>
+                    <option value="ALTA">ALTA</option>
+                    <option value="URGENTE">URGENTE</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] font-bold text-slate-400 uppercase">Detalle del Avance</label>
+                <textarea
+                  rows={2}
+                  placeholder="Describe qué se avanzó..."
+                  value={newAvanceDesc}
+                  onChange={(e) => setNewAvanceDesc(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-md p-2 text-xs outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                {editingAvanceId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditAvanceInModal}
+                    className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-xs font-bold cursor-pointer transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSaveAvanceInModal}
+                  disabled={savingAvanceInModal || !newAvanceDesc.trim()}
+                  className={`px-3 py-1.5 ${
+                    editingAvanceId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                  } disabled:opacity-40 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors`}
+                >
+                  {editingAvanceId ? <Save className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                  {savingAvanceInModal ? 'Guardando...' : (editingAvanceId ? 'Actualizar Avance' : 'Agregar Avance')}
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -1559,7 +2389,7 @@ function FollowUpModal({ eventId, states, onClose, onSuccess, followUp }: any) {
           </div>
           <div className="flex justify-end gap-3 mt-4">
             <Button variant="ghost" onClick={onClose} className="px-6 text-xs md:text-sm">Cancelar</Button>
-            <Button type="submit" disabled={loading} className="px-8 text-xs md:text-sm">{loading ? 'Procesando...' : (followUp ? 'Actualizar' : 'Registrar')}</Button>
+            <Button type="submit" disabled={loading} className="px-8 text-xs md:text-sm">{loading ? 'Procesando...' : (followUp ? 'Actualizar Tema' : 'Registrar Tema')}</Button>
           </div>
         </form>
       </motion.div>
